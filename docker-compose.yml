@@ -1,0 +1,94 @@
+
+services:
+  # Infrastructure (Backing Services)
+  postgres:
+    image: postgres:15-alpine
+    container_name: heimdall-postgres
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: heimdall
+    ports:
+      - "5432:5432" # Host:Container
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - heimdall-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d heimdall"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    
+  redis:
+    image: redis:7-alpine
+    container_name: heimdall-redis
+    ports:
+      - "6379:6379" # Host:Container
+    networks:
+      - heimdall-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Heimdall Services
+  control-plane:
+    container_name: heimdall-control
+    build:
+      context: . # Root context to access /internal
+      dockerfile: Dockerfile.control-plane
+    ports:
+      - "8080:8080" # REST API
+    environment:
+      - DATABASE_URL=postgres://user:password@postgres:5432/heimdall?sslmode=disable
+      - REDIS_URL=redis:6379
+      - LOG_LEVEL=debug
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - heimdall-net
+
+  data-plane:
+    container_name: heimdall-data
+    build:
+      context: .
+      dockerfile: Dockerfile.data-plane
+    ports:
+      - "50051:50051" # gRPC API
+    environment:
+      - REDIS_URL=redis:6379
+      - LOG_LEVEL=debug
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - heimdall-net
+
+  syncer:
+    container_name: heimdall-syncer
+    build:
+      context: .
+      dockerfile: Dockerfile.syncer
+    environment:
+      - DATABASE_URL=postgres://user:password@postgres:5432/heimdall?sslmode=disable
+      - REDIS_URL=redis:6379
+      - LOG_LEVEL=debug
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - heimdall-net
+
+volumes:
+  pgdata: # Persistent storage for Postgres
+
+networks:
+  heimdall-net:
+    driver: bridge

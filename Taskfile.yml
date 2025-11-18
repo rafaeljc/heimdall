@@ -1,0 +1,27 @@
+
+version: '3'
+
+tasks:
+  default:
+    desc: Lists available tasks
+    cmds:
+      - task --list
+
+  # Development Lifecycle
+  dev-up:
+    desc: Starts the local environment (builds images and starts containers)
+    cmds:
+      # build ensures that if you change main.go, the image is recreated
+      - docker compose up -d --build
+      - echo "Heimdall environment is running!"
+
+  dev-down:
+    desc: Stops and removes all containers and networks
+    cmds:
+      - docker compose down
+      - echo "Environment stopped."
+
+  logs:
+    desc: Tails logs from all running services
+    cmds:
+      - docker compose logs -f
