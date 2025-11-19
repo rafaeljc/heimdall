@@ -25,3 +25,9 @@ tasks:
     desc: Tails logs from all running services
     cmds:
       - docker compose logs -f
+  
+  # --- Quality & Checks ---
+  lint:
+    desc: Runs golangci-lint with strict configuration
+    cmds:
+      - golangci-lint run ./...

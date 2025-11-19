@@ -1,0 +1,65 @@
+# Options for analysis execution
+run:
+  # Timeout for analysis, e.g. 30s, 5m.
+  # Default: 1m
+  timeout: 5m
+
+  # Include test files in the analysis.
+  tests: true
+
+  # Allow multiple parallel runners.
+  allow-parallel-runners: true
+
+# Linter selection
+linters:
+  disable-all: true
+  enable:
+    # --- Bugs & Correctness ---
+    - errcheck      # Forces error checking (no _ = func())
+    - govet         # Official Go vetting tool (reports suspicious constructs)
+    - staticcheck   # Advanced static analysis (detects bugs, simplifications)
+    - bodyclose     # Checks whether HTTP response body is closed successfully
+    - noctx         # finds sending http request without context.Context
+    - gosec         # Inspects source code for security problems
+
+    # --- Style & Formatting ---
+    - revive        # Modern, faster replacement for golint
+    - goimports     # Checks missing or unformatted imports
+    - goconst       # Finds repeated strings that could be constants
+    - unconvert     # Removes unnecessary type conversions
+    - misspell      # Finds commonly misspelled English words
+
+    # --- Complexity & Quality ---
+    - gocyclo       # Computes and checks the cyclomatic complexity of functions
+    - gocritic      # Provides diagnostics that check for bugs, performance, and style issues
+
+# Linter specific settings
+linters-settings:
+  gocyclo:
+    # Minimal complexity of function to report it.
+    # Functions with complexity > 15 should be refactored.
+    min-complexity: 15
+  
+  revive:
+    rules:
+      # Force comments on exported functions (Public API)
+      - name: exported
+        severity: warning
+        disabled: false
+        arguments:
+          - "checkPrivateReceivers"
+
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+
+# Rules for ignoring specific issues
+issues:
+  # Exclude some overly strict rules for test files
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
