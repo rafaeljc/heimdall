@@ -12,6 +12,7 @@ services:
       - "5432:5432" # Host:Container
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
     networks:
       - heimdall-net
     healthcheck:
