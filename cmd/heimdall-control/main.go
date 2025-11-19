@@ -1,28 +1,130 @@
+// Package main initializes and runs the Heimdall Control Plane service.
+//
+// It acts as the REST API entrypoint for the Admin UI and orchestrates
+// database connections, HTTP server lifecycle, and graceful shutdown procedures.
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/rafaeljc/heimdall/internal/database"
 )
 
+// main is the application entrypoint.
+// It delegates execution to the run() function and handles the process exit code
+// based on the returned error to ensure proper integration with container orchestrators.
 func main() {
-	port := "8080"
+	if err := run(); err != nil {
+		log.Printf("Fatal error: %v", err)
+		os.Exit(1)
+	}
+}
+
+// run executes the service lifecycle: initialization, server startup, and graceful shutdown.
+// It returns an error instead of exiting directly, allowing deferred functions
+// (like database cleanup) to execute properly before the process terminates.
+func run() error {
 	appName := "heimdall-control-plane"
+	port := "8080"
 
 	log.Printf("Starting %s service...", appName)
-	log.Printf("Listening on port %s", port)
 
-	// Minimal HTTP server to keep the process alive and bind to the port
+	// -------------------------------------------------------------------------
+	// 1. Database Connection Setup
+	// -------------------------------------------------------------------------
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		return fmt.Errorf("DATABASE_URL environment variable is required")
+	}
+
+	// Create a background context for the initialization phase
+	ctx := context.Background()
+
+	// Initialize the DB Pool.
+	// This call might block or fail if the DB is unreachable, ensuring fail-fast behavior.
+	if _, err := database.Connect(ctx, dbURL); err != nil {
+		return fmt.Errorf("could not connect to database: %w", err)
+	}
+	// Ensure the connection pool is closed when run() returns.
+	defer database.Close()
+
+	// -------------------------------------------------------------------------
+	// 2. HTTP Server Setup
+	// -------------------------------------------------------------------------
+
+	// Register the Liveness Probe (Healthcheck).
+	// This endpoint is used by Kubernetes/Docker to verify if the service is healthy.
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		// Deep health check: verify if the DB is reachable via Ping.
+		if err := database.GetPool().Ping(r.Context()); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprintf(w, "Database Unreachable: %v", err)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "OK")
 	})
 
-	// If ListenAndServe fails, log the error and exit
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
-		log.Printf("Failed to start server: %v", err)
-		os.Exit(1)
+	server := &http.Server{
+		Addr: ":" + port,
+		// Security: Prevent Slowloris attacks by enforcing a timeout on header reading.
+		ReadHeaderTimeout: 5 * time.Second,
 	}
+
+	// Create the Listener explicitly before starting the server.
+	// This allows us to validate that the port is available immediately and
+	// log the "Listening" message with confidence.
+	listener, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		return fmt.Errorf("failed to bind port %s: %w", port, err)
+	}
+
+	log.Printf("Listening on port %s", port)
+
+	// Start the HTTP server in a separate goroutine so it doesn't block the main thread.
+	// We use a buffered error channel to capture any startup failures (e.g., port closed after bind).
+	errChan := make(chan error, 1)
+	go func() {
+		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+			errChan <- fmt.Errorf("failed to serve: %w", err)
+		}
+	}()
+
+	// -------------------------------------------------------------------------
+	// 3. Graceful Shutdown
+	// -------------------------------------------------------------------------
+
+	// Create a channel to listen for OS interrupt signals (Ctrl+C, SIGTERM).
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Block and wait for either:
+	// 1. A fatal server error (via errChan)
+	// 2. An OS signal to stop (via sigChan)
+	select {
+	case err := <-errChan:
+		return err
+	case <-sigChan:
+		log.Println("Shutdown signal received. Cleaning up resources...")
+	}
+
+	// Create a timeout context to force shutdown after 5 seconds if
+	// pending requests do not finish in time.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("server forced to shutdown: %w", err)
+	}
+
+	log.Println("Service exited successfully")
+	return nil
 }
