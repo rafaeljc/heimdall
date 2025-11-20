@@ -1,13 +1,16 @@
 
 version: '3'
 
+vars:
+  BIN_DIR: bin
+
 tasks:
   default:
     desc: Lists available tasks
     cmds:
       - task --list
 
-  # Development Lifecycle
+  # --- Development Environment ---
   dev-up:
     desc: Starts the local environment (builds images and starts containers)
     cmds:
@@ -31,3 +34,21 @@ tasks:
     desc: Runs golangci-lint with strict configuration
     cmds:
       - golangci-lint run ./...
+
+  # --- Testing ---
+  test:
+    desc: Runs all unit tests
+    cmds:
+      # Tests only internal logic, skipping integration tests for now
+      - go test ./internal/... -v
+
+  # --- Build ---
+  build:
+    desc: Builds all Go binaries locally to verify compilation
+    cmds:
+      - mkdir -p {{.BIN_DIR}}
+      - go build -o {{.BIN_DIR}}/heimdall-control ./cmd/heimdall-control
+      - go build -o {{.BIN_DIR}}/heimdall-data ./cmd/heimdall-data
+      - go build -o {{.BIN_DIR}}/heimdall-syncer ./cmd/heimdall-syncer
+    sources:
+      - ./**/*.go
