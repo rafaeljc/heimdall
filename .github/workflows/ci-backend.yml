@@ -47,7 +47,8 @@ jobs:
       - name: Install Task
         uses: arduino/setup-task@v2
         with:
-          version: 3.x
+          version: 3.45.5
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
           
       - name: Check Module Consistency
         # Fails if go.mod/go.sum are not up-to-date
@@ -55,14 +56,12 @@ jobs:
           go mod tidy
           git diff --exit-code
 
-      - name: Install GolangCI-Lint
-        # We install a pinned version to ensure consistency across all environments
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.61.0
-
-      - name: Run Lint
+      - name: Run GolangCI-Lint
         # Runs the strict linter configuration defined in .golangci.yml
-        run: task lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.61.0
+          args: --timeout=5m
 
       - name: Run Unit Tests
         # Runs standard unit tests
