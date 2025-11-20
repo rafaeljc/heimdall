@@ -1,6 +1,6 @@
 module github.com/rafaeljc/heimdall
 
-go 1.24.4
+go 1.23.0
 
 require github.com/jackc/pgx/v5 v5.7.6
 
