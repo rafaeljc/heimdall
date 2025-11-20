@@ -1,0 +1,72 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Taskfile.yml'
+      - '.golangci.yml'
+      - 'proto/**'
+      - 'migrations/**'
+      - '.github/workflows/ci-backend.yml'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Taskfile.yml'
+      - '.golangci.yml'
+      - 'proto/**'
+      - 'migrations/**'
+      - '.github/workflows/ci-backend.yml'
+
+# Cancel previous runs of the same PR to save resources
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-check:
+    name: Quality & Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true # Automatically caches Go modules and build cache
+
+      - name: Install Task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.45.5
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Check Module Consistency
+        # Fails if go.mod/go.sum are not up-to-date
+        run: |
+          go mod tidy
+          git diff --exit-code
+
+      - name: Run GolangCI-Lint
+        # Runs the strict linter configuration defined in .golangci.yml
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.61.0
+          args: --timeout=5m
+
+      - name: Run Unit Tests
+        # Runs standard unit tests
+        run: task test
+
+      - name: Build Verification
+        # Verifies that all microservices binaries compile successfully
+        run: task build
