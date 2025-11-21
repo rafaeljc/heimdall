@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rafaeljc/heimdall/internal/controlapi"
 	"github.com/rafaeljc/heimdall/internal/database"
 )
 
@@ -60,22 +61,13 @@ func run() error {
 	// 2. HTTP Server Setup
 	// -------------------------------------------------------------------------
 
-	// Register the Liveness Probe (Healthcheck).
-	// This endpoint is used by Kubernetes/Docker to verify if the service is healthy.
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		// Deep health check: verify if the DB is reachable via Ping.
-		if err := database.GetPool().Ping(r.Context()); err != nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			fmt.Fprintf(w, "Database Unreachable: %v", err)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "OK")
-	})
+	// Initialize the API Router
+	// Dependency Injection: We pass the initialized DB pool to the API handler.
+	api := controlapi.NewAPI(database.GetPool())
 
 	server := &http.Server{
-		Addr: ":" + port,
-		// Security: Prevent Slowloris attacks by enforcing a timeout on header reading.
+		Addr:              ":" + port,
+		Handler:           api.Router,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
