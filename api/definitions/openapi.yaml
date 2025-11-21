@@ -1,0 +1,317 @@
+openapi: 3.0.3
+
+info:
+  title: Heimdall Control Plane API
+  description: |
+    Management API for the Heimdall Feature Flag system.
+    
+    This API allows administrators and services to manage the lifecycle of feature flags.
+    It follows RESTful principles, enforces API Key authentication, and uses offset-based pagination.
+  version: 1.0.0
+  contact:
+    name: Heimdall Team
+    url: https://github.com/rafaeljc/heimdall
+
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Local Development Environment
+
+# ------------------------------------------------------------------------------
+# SECURITY
+# ------------------------------------------------------------------------------
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        Standard API Key authentication. 
+        The key must be provided in the `X-API-Key` header.
+
+  schemas:
+    # --- Domain Models ---
+    Flag:
+      type: object
+      description: Represents a feature flag definition matching the PostgreSQL schema.
+      required: [id, key, name, enabled, default_value, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+          description: Internal surrogate key (SERIAL).
+          readOnly: true
+        key:
+          type: string
+          pattern: '^[a-z0-9-]+$'
+          minLength: 3
+          maxLength: 255
+          example: "new-checkout-flow"
+          description: |
+            Natural key (slug). Must be unique, URL-safe, and contain only lowercase letters, numbers, and hyphens.
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          example: "New Checkout Flow 2.0"
+          description: Human-readable name.
+        description:
+          type: string
+          example: "Enables the React-based checkout page for beta users."
+          description: Detailed description (TEXT).
+        enabled:
+          type: boolean
+          example: false
+          description: Master switch. If false, the flag is disabled globally.
+        default_value:
+          type: boolean
+          example: false
+          description: Fallback value returned when the flag is enabled but no rule matches.
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          example: "2025-11-21T11:30:00Z"
+          description: Timestamp of creation. Always returned in UTC (ISO 8601 / RFC 3339).
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+          example: "2025-11-21T11:30:00Z"
+          description: Timestamp of creation. Always returned in UTC (ISO 8601 / RFC 3339).
+
+    # --- Request Bodies ---
+    CreateFlagRequest:
+      type: object
+      required: [key, name]
+      properties:
+        key:
+          type: string
+          pattern: '^[a-z0-9-]+$'
+          minLength: 3
+          maxLength: 255
+          description: Unique key. Cannot be changed after creation.
+          example: "dark-mode-beta"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          example: "Dark Mode Beta"
+        description:
+          type: string
+        # Optional fields (DB defaults to false if omitted)
+        enabled:
+          type: boolean
+          default: false
+        default_value:
+          type: boolean
+          default: false
+
+    UpdateFlagRequest:
+      type: object
+      description: Fields to be updated. All fields are optional (PATCH semantics).
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+        enabled:
+          type: boolean
+        default_value:
+          type: boolean
+
+    # --- Responses & Metadata ---
+    PaginatedFlagList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Flag'
+        pagination:
+          type: object
+          properties:
+            total_items:
+              type: integer
+              example: 100
+            total_pages:
+              type: integer
+              example: 10
+            current_page:
+              type: integer
+              example: 1
+            page_size:
+              type: integer
+              example: 10
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+          example: "ERR_INVALID_INPUT"
+          description: Machine-readable error code.
+        message:
+          type: string
+          example: "Validation failed for the create request."
+          description: Human-readable error message.
+        details:
+          type: array
+          description: Optional list of specific field errors.
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+                example: "key"
+              issue:
+                type: string
+                example: "must contain only lowercase letters"
+
+# Apply security globally
+security:
+  - ApiKeyAuth: []
+
+# ------------------------------------------------------------------------------
+# PATHS
+# ------------------------------------------------------------------------------
+paths:
+  /flags:
+    get:
+      summary: List feature flags
+      description: Retrieves a list of feature flags with pagination.
+      operationId: listFlags
+      tags: [Flags]
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+          description: Page number.
+        - in: query
+          name: page_size
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+          description: Number of items per page.
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedFlagList'
+        '400':
+          description: Invalid pagination parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    post:
+      summary: Create a new flag
+      description: Creates a new feature flag definition.
+      operationId: createFlag
+      tags: [Flags]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFlagRequest'
+      responses:
+        '201':
+          description: Flag created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Flag'
+        '400':
+          description: Invalid input (e.g., invalid key format)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflict - A flag with this key already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /flags/{key}:
+    parameters:
+      - in: path
+        name: key
+        schema:
+          type: string
+        required: true
+        description: The unique natural key of the flag.
+    
+    get:
+      summary: Get a flag
+      description: Retrieves detailed information about a specific flag.
+      operationId: getFlag
+      tags: [Flags]
+      responses:
+        '200':
+          description: Flag details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Flag'
+        '404':
+          description: Flag not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    patch:
+      summary: Update a flag
+      description: Updates specific fields of a flag (Partial Update).
+      operationId: updateFlag
+      tags: [Flags]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateFlagRequest'
+      responses:
+        '200':
+          description: Flag updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Flag'
+        '400':
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Flag not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      summary: Delete a flag
+      description: Permanently removes a feature flag.
+      operationId: deleteFlag
+      tags: [Flags]
+      responses:
+        '204':
+          description: Flag deleted successfully
+        '404':
+          description: Flag not found
