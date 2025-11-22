@@ -1,7 +1,7 @@
 // Package main initializes and runs the Heimdall Control Plane service.
 //
-// It acts as the REST API entrypoint for the Admin UI and orchestrates
-// database connections, HTTP server lifecycle, and graceful shutdown procedures.
+// It acts as the composition root, wiring up the database, repository layer,
+// and REST API, while managing the application lifecycle and graceful shutdown.
 package main
 
 import (
@@ -17,6 +17,7 @@ import (
 
 	"github.com/rafaeljc/heimdall/internal/controlapi"
 	"github.com/rafaeljc/heimdall/internal/database"
+	"github.com/rafaeljc/heimdall/internal/store"
 )
 
 // main is the application entrypoint.
@@ -58,12 +59,20 @@ func run() error {
 	defer database.Close()
 
 	// -------------------------------------------------------------------------
-	// 2. HTTP Server Setup
+	// 2. Dependency Injection & Wiring
 	// -------------------------------------------------------------------------
 
-	// Initialize the API Router
-	// Dependency Injection: We pass the initialized DB pool to the API handler.
-	api := controlapi.NewAPI(database.GetPool())
+	// Layer 1: Data Access (Repository)
+	// Initialize the Postgres store using the connection pool.
+	flagStore := store.NewPostgresStore(database.GetPool())
+
+	// Layer 2: API (Controller)
+	// Inject the repository into the API handler.
+	api := controlapi.NewAPI(flagStore)
+
+	// -------------------------------------------------------------------------
+	// 3. HTTP Server Setup
+	// -------------------------------------------------------------------------
 
 	server := &http.Server{
 		Addr:              ":" + port,
@@ -91,7 +100,7 @@ func run() error {
 	}()
 
 	// -------------------------------------------------------------------------
-	// 3. Graceful Shutdown
+	// 4. Graceful Shutdown
 	// -------------------------------------------------------------------------
 
 	// Create a channel to listen for OS interrupt signals (Ctrl+C, SIGTERM).

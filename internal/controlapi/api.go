@@ -7,9 +7,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/render"
-	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/rafaeljc/heimdall/internal/validation"
+	"github.com/rafaeljc/heimdall/internal/store"
 )
 
 // API is the main struct that holds dependencies and the router for the Control Plane.
@@ -18,19 +17,22 @@ type API struct {
 	// Router is the Chi multiplexer that handles HTTP requests.
 	Router *chi.Mux
 
-	// db is the connection pool to PostgreSQL.
-	// In the future, this should be an interface (Repository Pattern) for better mocking.
-	db *pgxpool.Pool
+	// flags is the data access layer for feature flags.
+	// We use the interface type to allow for mocking in unit tests.
+	flags store.FlagRepository
 }
 
 // NewAPI creates a new API instance and configures its routes.
-// It requires a valid database connection pool to be injected.
-func NewAPI(db *pgxpool.Pool) *API {
-	validation.AssertNotNil(db, "database pool")
+func NewAPI(flagRepo store.FlagRepository) *API {
+	// We check the interface explicitly.
+	// An interface is only nil if it has no underlying type and no value.
+	if flagRepo == nil {
+		panic("controlapi: flag repository cannot be nil")
+	}
 
 	api := &API{
 		Router: chi.NewRouter(),
-		db:     db,
+		flags:  flagRepo,
 	}
 
 	api.configureRoutes()
@@ -70,28 +72,14 @@ func (a *API) configureRoutes() {
 }
 
 // handleHealthCheck verifies if the service is healthy and can connect to the database.
-// It returns 200 OK if healthy, or 503 Service Unavailable if the DB is unreachable.
+// Note: To implement a Readiness Probe (Deep Check), we should extend the
+// FlagRepository interface to include a Ping() method. For now, this checks HTTP serving capability.
 func (a *API) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
-	// Ping the database to ensure connectivity
-	if err := a.db.Ping(r.Context()); err != nil {
-		render.Status(r, http.StatusServiceUnavailable)
-		render.JSON(w, r, map[string]string{
-			"status": "unhealthy",
-			"error":  "Database unreachable",
-		})
-		return
-	}
-
 	render.Status(r, http.StatusOK)
 	render.JSON(w, r, map[string]string{"status": "ok"})
 }
 
 // --- Handler Stubs (To be implemented) ---
-
-func (a *API) handleCreateFlag(w http.ResponseWriter, r *http.Request) {
-	render.Status(r, http.StatusNotImplemented)
-	render.JSON(w, r, ErrorResponse{Code: "NOT_IMPLEMENTED", Message: "Endpoint coming soon"})
-}
 
 func (a *API) handleListFlags(w http.ResponseWriter, r *http.Request) {
 	render.Status(r, http.StatusNotImplemented)

@@ -2,7 +2,15 @@
 // It handles HTTP routing, request decoding, validation, and response formatting.
 package controlapi
 
-import "time"
+import (
+	"regexp"
+	"strings"
+	"time"
+)
+
+// flagKeyRegex ensures keys are URL-safe slugs (lowercase, numbers, hyphens).
+// We compile it once at package initialization for performance.
+var flagKeyRegex = regexp.MustCompile(`^[a-z0-9-]+$`)
 
 // Flag represents the feature flag resource as stored in the database.
 // It maps directly to the 'flags' table in PostgreSQL and the 'Flag' schema in OpenAPI.
@@ -32,6 +40,51 @@ type Flag struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// -----------------------------------------------------------------------------
+// Reusable Validation Logic
+// -----------------------------------------------------------------------------
+
+// validateFlagKey enforces the format and length rules for the natural key.
+// It is isolated to allow reuse in other contexts (e.g., renaming, cloning).
+func validateFlagKey(key string) *ErrorResponse {
+	if key == "" {
+		return &ErrorResponse{
+			Code:    "ERR_INVALID_INPUT",
+			Message: "Key is required",
+		}
+	}
+	if len(key) < 3 || len(key) > 255 {
+		return &ErrorResponse{
+			Code:    "ERR_INVALID_INPUT",
+			Message: "Key must be between 3 and 255 characters",
+		}
+	}
+	if !flagKeyRegex.MatchString(key) {
+		return &ErrorResponse{
+			Code:    "ERR_INVALID_INPUT",
+			Message: "Key must strictly contain only lowercase letters, numbers, and hyphens (slug format)",
+		}
+	}
+	return nil
+}
+
+// validateFlagName enforces rules for the human-readable name.
+func validateFlagName(name string) *ErrorResponse {
+	if name == "" {
+		return &ErrorResponse{
+			Code:    "ERR_INVALID_INPUT",
+			Message: "Name is required",
+		}
+	}
+	if len(name) > 255 {
+		return &ErrorResponse{
+			Code:    "ERR_INVALID_INPUT",
+			Message: "Name must be less than 255 characters",
+		}
+	}
+	return nil
+}
+
 // CreateFlagRequest defines the payload for creating a new flag.
 // Used for JSON decoding in the POST /flags endpoint.
 type CreateFlagRequest struct {
@@ -49,6 +102,28 @@ type CreateFlagRequest struct {
 
 	// DefaultValue defaults to false if omitted.
 	DefaultValue bool `json:"default_value"`
+}
+
+// Sanitize cleans up input data by trimming whitespace and normalizing case.
+// This prevents "dirty" data from entering the system logic.
+func (r *CreateFlagRequest) Sanitize() {
+	r.Key = strings.ToLower(strings.TrimSpace(r.Key))
+	r.Name = strings.TrimSpace(r.Name)
+	r.Description = strings.TrimSpace(r.Description)
+}
+
+// Validate checks if the request data adheres to business rules.
+// It returns a structured *ErrorResponse if validation fails, or nil if valid.
+func (r *CreateFlagRequest) Validate() *ErrorResponse {
+	if err := validateFlagKey(r.Key); err != nil {
+		return err
+	}
+
+	if err := validateFlagName(r.Name); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // UpdateFlagRequest defines the payload for partial updates (PATCH).
