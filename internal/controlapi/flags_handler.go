@@ -1,8 +1,11 @@
 package controlapi
 
 import (
+	"fmt"
 	"log"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/render"
@@ -92,4 +95,116 @@ func (a *API) handleCreateFlag(w http.ResponseWriter, r *http.Request) {
 	// 6. Return Success
 	render.Status(r, http.StatusCreated)
 	render.JSON(w, r, resp)
+}
+
+// handleListFlags processes the GET /api/v1/flags request.
+//
+// Responsibilities:
+// 1. Parses and sanitizes pagination parameters (page, page_size).
+// 2. Calls the Repository to fetch data and total count.
+// 3. Maps domain models to DTOs.
+// 4. Calculates pagination metadata (total pages).
+// 5. Returns the PaginatedResponse.
+func (a *API) handleListFlags(w http.ResponseWriter, r *http.Request) {
+	// 1. Parse Query Parameters (Type Validation)
+	// We return 400 Bad Request if the user sends invalid types (e.g., page=banana).
+	page, err := parseOptionalInt(r, "page", 1)
+	if err != nil {
+		render.Status(r, http.StatusBadRequest)
+		render.JSON(w, r, ErrorResponse{
+			Code:    "ERR_INVALID_QUERY_PARAM",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	pageSize, err := parseOptionalInt(r, "page_size", 10)
+	if err != nil {
+		render.Status(r, http.StatusBadRequest)
+		render.JSON(w, r, ErrorResponse{
+			Code:    "ERR_INVALID_QUERY_PARAM",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	// 2. Sanitize & Clamp (Logic Validation)
+	// We silently correct out-of-bounds values to ensure system stability and UX.
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 10
+	}
+	if pageSize > 100 {
+		pageSize = 100 // Hard limit to prevent large queries
+	}
+
+	// 3. Calculate Offset
+	offset := (page - 1) * pageSize
+
+	// 4. Call Repository
+	flags, totalItems, err := a.flags.ListFlags(r.Context(), pageSize, offset)
+	if err != nil {
+		log.Printf("CRITICAL: failed to list flags from db: %v", err)
+
+		render.Status(r, http.StatusInternalServerError)
+		render.JSON(w, r, ErrorResponse{
+			Code:    "ERR_INTERNAL",
+			Message: "Failed to list flags",
+		})
+		return
+	}
+
+	// 5. Map to DTOs
+	dtos := make([]Flag, len(flags))
+	for i, f := range flags {
+		dtos[i] = Flag{
+			ID:           f.ID,
+			Key:          f.Key,
+			Name:         f.Name,
+			Description:  f.Description,
+			Enabled:      f.Enabled,
+			DefaultValue: f.DefaultValue,
+			CreatedAt:    f.CreatedAt,
+			UpdatedAt:    f.UpdatedAt,
+		}
+	}
+
+	// 6. Calculate Metadata
+	totalPages := 0
+	if totalItems > 0 {
+		totalPages = int(math.Ceil(float64(totalItems) / float64(pageSize)))
+	}
+
+	// 7. Build Response
+	resp := PaginatedResponse{
+		Data: dtos,
+		Pagination: Pagination{
+			TotalItems:  totalItems,
+			TotalPages:  totalPages,
+			CurrentPage: page,
+			PageSize:    pageSize,
+		},
+	}
+
+	render.Status(r, http.StatusOK)
+	render.JSON(w, r, resp)
+}
+
+// --- Private Helpers ---
+
+// parseOptionalInt extracts an integer from the query string.
+// If the parameter is missing, it returns the defaultValue.
+// It only returns an error if the parameter is present but malformed.
+func parseOptionalInt(r *http.Request, key string, defaultValue int) (int, error) {
+	valStr := r.URL.Query().Get(key)
+	if valStr == "" {
+		return defaultValue, nil
+	}
+	val, err := strconv.Atoi(valStr)
+	if err != nil {
+		return 0, fmt.Errorf("parameter '%s' must be an integer", key)
+	}
+	return val, nil
 }

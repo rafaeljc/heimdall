@@ -31,9 +31,9 @@ type FlagRepository interface {
 	// CreateFlag inserts a new flag and populates the ID and timestamps in the struct.
 	CreateFlag(ctx context.Context, f *Flag) error
 
-	// Future methods (Placeholder for next iterations):
-	// GetFlagByKey(ctx context.Context, key string) (*Flag, error)
-	// ListFlags(ctx context.Context, limit, offset int) ([]Flag, int64, error)
+	// ListFlags retrieves a paginated list of flags and the total count of records.
+	// It orders results by updated_at descending (newest/modified first).
+	ListFlags(ctx context.Context, limit, offset int) ([]*Flag, int64, error)
 }
 
 // PostgresStore is the implementation of FlagRepository backed by PostgreSQL.
@@ -43,7 +43,6 @@ type PostgresStore struct {
 
 // NewPostgresStore creates a new repository instance with the given connection pool.
 func NewPostgresStore(db *pgxpool.Pool) *PostgresStore {
-	// We assume db is validated upstream (in the API constructor or main)
 	return &PostgresStore{db: db}
 }
 
@@ -78,4 +77,64 @@ func (s *PostgresStore) CreateFlag(ctx context.Context, f *Flag) error {
 	}
 
 	return nil
+}
+
+// ListFlags retrieves a subset of flags based on pagination parameters.
+// It executes two queries: one for the data and one for the total count.
+func (s *PostgresStore) ListFlags(ctx context.Context, limit, offset int) ([]*Flag, int64, error) {
+	// 1. Get Total Count (for pagination metadata)
+	// We prioritize a separate count query over window functions (COUNT(*) OVER())
+	// for simplicity and predictable performance in this specific use case.
+	var total int64
+	countQuery := `SELECT count(*) FROM flags`
+
+	if err := s.db.QueryRow(ctx, countQuery).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count flags: %w", err)
+	}
+
+	// If there are no flags, return empty immediately to save the second query.
+	if total == 0 {
+		return []*Flag{}, 0, nil
+	}
+
+	// 2. Get Data
+	query := `
+		SELECT id, key, name, description, enabled, default_value, created_at, updated_at
+		FROM flags
+		ORDER BY id DESC
+		LIMIT $1 OFFSET $2
+	`
+
+	rows, err := s.db.Query(ctx, query, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list flags: %w", err)
+	}
+	// Ensure rows are closed to prevent connection leaks in the pool.
+	defer rows.Close()
+
+	// Pre-allocate slice with a capacity of 'limit' to avoid resizing allocations.
+	flags := make([]*Flag, 0, limit)
+
+	for rows.Next() {
+		var f Flag
+		if err := rows.Scan(
+			&f.ID,
+			&f.Key,
+			&f.Name,
+			&f.Description,
+			&f.Enabled,
+			&f.DefaultValue,
+			&f.CreatedAt,
+			&f.UpdatedAt,
+		); err != nil {
+			return nil, 0, fmt.Errorf("failed to scan flag row: %w", err)
+		}
+		flags = append(flags, &f)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("rows iteration error: %w", err)
+	}
+
+	return flags, total, nil
 }
