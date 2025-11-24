@@ -87,6 +87,18 @@ services:
     networks:
       - heimdall-net
 
+  swagger-ui:
+    image: swaggerapi/swagger-ui
+    container_name: heimdall-docs
+    ports:
+      - "8081:8080"
+    environment:
+      SWAGGER_JSON: /definition/openapi.yaml
+    volumes:
+      - ./api/definitions/openapi.yaml:/definition/openapi.yaml
+    networks:
+      - heimdall-net
+
 volumes:
   pgdata: # Persistent storage for Postgres
 
