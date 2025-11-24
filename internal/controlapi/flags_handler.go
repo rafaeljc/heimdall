@@ -1,6 +1,7 @@
 package controlapi
 
 import (
+	"log"
 	"net/http"
 	"strings"
 
@@ -66,7 +67,7 @@ func (a *API) handleCreateFlag(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// System Error: Internal Server Error
-		// In a production system, we would log the full error stack trace here.
+		log.Printf("CRITICAL: failed to create flag in db: %v", err)
 		render.Status(r, http.StatusInternalServerError)
 		render.JSON(w, r, ErrorResponse{
 			Code:    "ERR_INTERNAL",
