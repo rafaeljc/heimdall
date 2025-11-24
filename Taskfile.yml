@@ -3,6 +3,7 @@ version: '3'
 
 vars:
   BIN_DIR: bin
+  PROTO_DIR: proto
 
 tasks:
   default:
@@ -10,41 +11,52 @@ tasks:
     cmds:
       - task --list
 
-  # --- Development Environment ---
-  dev-up:
+  # --- DEVELOPMENT WORKFLOW (dev:*) ---
+  dev:up:
     desc: Starts the local environment (builds images and starts containers)
     cmds:
       # build ensures that if you change main.go, the image is recreated
       - docker compose up -d --build
       - echo "Heimdall environment is running!"
+      - echo "Control API at http://localhost:8080"
+      - echo "Swagger UI at http://localhost:8081"
 
-  dev-down:
-    desc: Stops and removes all containers and networks
+  dev:down:
+    desc: Stops the local environment (stops containers and removes networks)
     cmds:
       - docker compose down
       - echo "Environment stopped."
 
-  logs:
+  dev:reset:
+    desc: Destroys ALL data volumes (Clean Start)
+    cmds:
+      - docker compose down -v
+      - echo "Destroyed all data volumes. Run 'task dev:up' to start fresh."
+
+  dev:logs:
     desc: Tails logs from all running services
     cmds:
       - docker compose logs -f
   
-  # --- Quality & Checks ---
-  lint:
-    desc: Runs golangci-lint with strict configuration
+  # --- QUALITY & TESTING (check:* / test:*) ---
+  check:lint:
+    desc: Runs golangci-lint
     cmds:
       - golangci-lint run ./...
 
-  # --- Testing ---
-  test:
-    desc: Runs all unit tests
+  test:unit:
+    desc: Runs unit tests
     cmds:
-      # Tests only internal logic, skipping integration tests for now
       - go test ./internal/... -v
 
-  # --- Build ---
-  build:
-    desc: Builds all Go binaries locally to verify compilation
+  test:integration:
+    desc: Runs integration tests
+    cmds:
+      - go test ./tests/integration/... -v -tags=integration
+
+  # --- BUILD (build:*) ---
+  build:local:
+    desc: Builds all Go binaries locally to /bin
     cmds:
       - mkdir -p {{.BIN_DIR}}
       - go build -o {{.BIN_DIR}}/heimdall-control ./cmd/heimdall-control
@@ -52,3 +64,20 @@ tasks:
       - go build -o {{.BIN_DIR}}/heimdall-syncer ./cmd/heimdall-syncer
     sources:
       - ./**/*.go
+
+  build:docker:
+    desc: Builds Production Docker images for all services
+    cmds:
+      - docker build -f Dockerfile.control-plane -t heimdall-control:latest .
+      - docker build -f Dockerfile.data-plane -t heimdall-data:latest .
+      - docker build -f Dockerfile.syncer -t heimdall-syncer:latest .
+
+  # --- CODE GENERATION (generate:*) ---
+  generate:proto:
+    desc: Generates Go code from .proto files
+    cmds:
+      - protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative {{.PROTO_DIR}}/heimdall/v1/*.proto
+    sources:
+      - '{{.PROTO_DIR}}/**/*.proto'
+    generates:
+      - '{{.PROTO_DIR}}/**/*.pb.go'
