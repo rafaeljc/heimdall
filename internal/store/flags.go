@@ -12,6 +12,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// Compile-time check to verify that PostgresStore implements FlagRepository.
+// If the interface changes and the struct doesn't, the build fails here.
+var _ FlagRepository = (*PostgresStore)(nil)
+
 // Flag represents the database schema for a feature flag.
 // It mirrors the 'flags' table structure.
 type Flag struct {
@@ -32,7 +36,7 @@ type FlagRepository interface {
 	CreateFlag(ctx context.Context, f *Flag) error
 
 	// ListFlags retrieves a paginated list of flags and the total count of records.
-	// It orders results by updated_at descending (newest/modified first).
+	// It orders results by ID descending (deterministic).
 	ListFlags(ctx context.Context, limit, offset int) ([]*Flag, int64, error)
 }
 
@@ -43,6 +47,9 @@ type PostgresStore struct {
 
 // NewPostgresStore creates a new repository instance with the given connection pool.
 func NewPostgresStore(db *pgxpool.Pool) *PostgresStore {
+	if db == nil {
+		panic("store: database pool cannot be nil")
+	}
 	return &PostgresStore{db: db}
 }
 
