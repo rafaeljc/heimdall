@@ -58,21 +58,22 @@ This repository follows the **Standard Go Project Layout** and manages multiple 
 
 ## 🚀 Getting Started
 
-**Prerequisites**
-* [Go 1.24+](https://go.dev/)
+### Prerequisites
+
+* [Go 1.23+](https://go.dev/)
 * [Docker](https://www.docker.com/) & Docker Compose
 * [Task](https://taskfile.dev/)
 
-**Running Locally**
+### Running Locally
 
-To spin up the entire "Walking Skeleton" (Databases + Services):
+To spin up the entire "Walking Skeleton" (Databases + Services + Docs):
 
 ```bash
 # 1. Clone the repository
 git clone https://github.com/rafaeljc/heimdall.git
 
 # 2. Start the environment
-task dev-up
+task dev:up
 ```
 
 This will start:
@@ -81,16 +82,26 @@ This will start:
 * Redis (Port 6379)
 * Control Plane (Port 8080)
 * Data Plane (Port 50051)
+* Swagger UI (Port 8081)
 
-**Development Commands**
+### Development Commands
 
 | Command | Description |
-| ------- | ----------- |
-| `task build` | Builds all Go binaries to `/bin` |
-| `task test` | Runs unit tests |
-| `task proto` | Generates Go/Python code from `.proto` files |
-| `task docker:build` | Builds Docker images for all services |
-| `task logs` | Tails logs from the running docker-compose stack |
+| :--- | :--- |
+| **Development** | |
+| `task dev:up` | Starts the local environment (builds & runs) |
+| `task dev:down` | Stops the environment (preserves data) |
+| `task dev:reset` | **Resets** the environment (destroys data volumes) |
+| `task dev:logs` | Tails logs from all running services |
+| **Quality & Testing** | |
+| `task check:lint` | Runs golangci-lint |
+| `task test:unit` | Runs unit tests |
+| `task test:integration` | Runs integration tests |
+| **Build & Artifacts** | |
+| `task build:local` | Builds all Go binaries locally to `/bin` |
+| `task build:docker` | Builds Production Docker images |
+| **Code Generation** | |
+| `task generate:proto` | Generates Go code from `.proto` files |
 
 ## 🧠 Engineering Decisions (ADRs)
 
