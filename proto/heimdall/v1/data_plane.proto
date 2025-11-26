@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package heimdall.v1;
+
+// Configure the Go package path for the generated code.
+option go_package = "github.com/rafaeljc/heimdall/proto/heimdall/v1";
+
+// DataPlane service is the high-performance evaluation engine.
+// It handles flag evaluation requests from client SDKs via gRPC.
+service DataPlane {
+  // Evaluate checks a specific flag against a user context.
+  rpc Evaluate(EvaluateRequest) returns (EvaluateResponse);
+}
+
+// EvaluateRequest contains the targeting information needed for a decision.
+message EvaluateRequest {
+  // The unique key of the feature flag (e.g., "new-checkout").
+  string flag_key = 1;
+
+  // The context of the user/entity requesting the flag.
+  // In V1, we use a flexible map to allow arbitrary attributes 
+  // (e.g., {"user_id": "123", "region": "us", "plan": "premium"}).
+  // This avoids strict schema coupling between Client and Server.
+  map<string, string> context = 2;
+}
+
+// EvaluateResponse returns the final decision.
+message EvaluateResponse {
+  // True if the feature should be enabled for this context.
+  bool value = 1;
+
+  // Reason explains why the decision was made.
+  // Examples: "STATIC_OFF", "DEFAULT_VALUE", "RULE_MATCH".
+  // Critical for debugging why a user saw a specific version.
+  string reason = 2;
+}
