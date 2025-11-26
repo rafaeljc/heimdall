@@ -12,6 +12,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// Compile-time check to verify that PostgresStore implements FlagRepository.
+// If the interface changes and the struct doesn't, the build fails here.
+var _ FlagRepository = (*PostgresStore)(nil)
+
 // Flag represents the database schema for a feature flag.
 // It mirrors the 'flags' table structure.
 type Flag struct {
@@ -32,8 +36,12 @@ type FlagRepository interface {
 	CreateFlag(ctx context.Context, f *Flag) error
 
 	// ListFlags retrieves a paginated list of flags and the total count of records.
-	// It orders results by updated_at descending (newest/modified first).
+	// It orders results by ID descending (deterministic).
 	ListFlags(ctx context.Context, limit, offset int) ([]*Flag, int64, error)
+
+	// ListAllFlags retrieves all flags from the database.
+	// Used by the Syncer to populate the cache.
+	ListAllFlags(ctx context.Context) ([]*Flag, error)
 }
 
 // PostgresStore is the implementation of FlagRepository backed by PostgreSQL.
@@ -43,6 +51,9 @@ type PostgresStore struct {
 
 // NewPostgresStore creates a new repository instance with the given connection pool.
 func NewPostgresStore(db *pgxpool.Pool) *PostgresStore {
+	if db == nil {
+		panic("store: database pool cannot be nil")
+	}
 	return &PostgresStore{db: db}
 }
 
@@ -137,4 +148,45 @@ func (s *PostgresStore) ListFlags(ctx context.Context, limit, offset int) ([]*Fl
 	}
 
 	return flags, total, nil
+}
+
+// ListAllFlags retrieves all flags ordered by ID.
+// Warning: In a massive production DB, this should be batched.
+// For the V1 "Walking Skeleton", fetching all is acceptable.
+func (s *PostgresStore) ListAllFlags(ctx context.Context) ([]*Flag, error) {
+	query := `
+		SELECT id, key, name, description, enabled, default_value, created_at, updated_at
+		FROM flags
+		ORDER BY id ASC
+	`
+
+	rows, err := s.db.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list all flags: %w", err)
+	}
+	defer rows.Close()
+
+	var flags []*Flag
+	for rows.Next() {
+		var f Flag
+		if err := rows.Scan(
+			&f.ID,
+			&f.Key,
+			&f.Name,
+			&f.Description,
+			&f.Enabled,
+			&f.DefaultValue,
+			&f.CreatedAt,
+			&f.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan flag: %w", err)
+		}
+		flags = append(flags, &f)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration error: %w", err)
+	}
+
+	return flags, nil
 }

@@ -51,20 +51,19 @@ func run() error {
 	ctx := context.Background()
 
 	// Initialize the DB Pool.
-	// This call might block or fail if the DB is unreachable, ensuring fail-fast behavior.
-	if _, err := database.Connect(ctx, dbURL); err != nil {
+	pgPool, err := database.NewPostgresPool(ctx, dbURL)
+	if err != nil {
 		return fmt.Errorf("could not connect to database: %w", err)
 	}
-	// Ensure the connection pool is closed when run() returns.
-	defer database.Close()
+	defer pgPool.Close()
 
 	// -------------------------------------------------------------------------
 	// 2. Dependency Injection & Wiring
 	// -------------------------------------------------------------------------
 
 	// Layer 1: Data Access (Repository)
-	// Initialize the Postgres store using the connection pool.
-	flagStore := store.NewPostgresStore(database.GetPool())
+	// We pass the pgPool instance explicitly.
+	flagStore := store.NewPostgresStore(pgPool)
 
 	// Layer 2: API (Controller)
 	// Inject the repository into the API handler.
