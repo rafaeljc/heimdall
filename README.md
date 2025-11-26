@@ -93,6 +93,8 @@ This will start:
 | `task dev:down` | Stops the environment (preserves data) |
 | `task dev:reset` | **Resets** the environment (destroys data volumes) |
 | `task dev:logs` | Tails logs from all running services |
+| **Dependencies** | |
+| `task tidy:deps` | Runs `go mod tidy` forcing Go 1.23 compatibility |
 | **Quality & Testing** | |
 | `task check:lint` | Runs golangci-lint |
 | `task test:unit` | Runs unit tests |

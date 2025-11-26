@@ -21,6 +21,9 @@ type Service interface {
 	// SetFlag updates the hash fields for a specific flag.
 	SetFlag(ctx context.Context, key string, fields map[string]interface{}) error
 
+	// GetFlag retrieves all fields for a specific flag hash.
+	GetFlag(ctx context.Context, key string) (map[string]string, error)
+
 	// HealthCheck pings the redis server to ensure connectivity.
 	HealthCheck(ctx context.Context) error
 
@@ -64,8 +67,6 @@ func NewRedisCache(ctx context.Context, addr string) (*RedisCache, error) {
 }
 
 // SetFlag stores the flag data as a Hash in Redis (HSET).
-// It uses a pipeline to ensure atomicity if multiple fields are set,
-// though HSET is atomic by default for multiple fields in Redis 4.0+.
 func (c *RedisCache) SetFlag(ctx context.Context, key string, fields map[string]interface{}) error {
 	redisKey := fmt.Sprintf("%s:%s", KeyPrefix, key)
 
@@ -76,6 +77,21 @@ func (c *RedisCache) SetFlag(ctx context.Context, key string, fields map[string]
 	}
 
 	return nil
+}
+
+// GetFlag retrieves all fields from the Redis hash.
+// It returns map[string]string because Redis hashes are fundamentally strings.
+func (c *RedisCache) GetFlag(ctx context.Context, key string) (map[string]string, error) {
+	redisKey := fmt.Sprintf("%s:%s", KeyPrefix, key)
+
+	// HGetAll returns all fields and values of the hash.
+	// If the key does not exist, it returns an empty map and no error.
+	result, err := c.client.HGetAll(ctx, redisKey).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get flag %q from cache: %w", key, err)
+	}
+
+	return result, nil
 }
 
 // HealthCheck verifies the connection to the Redis server.
