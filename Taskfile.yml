@@ -81,3 +81,9 @@ tasks:
       - '{{.PROTO_DIR}}/**/*.proto'
     generates:
       - '{{.PROTO_DIR}}/**/*.pb.go'
+
+  # --- DEPENDENCY MANAGEMENT (tidy:*) ---
+  tidy:deps:
+    desc: Runs go mod tidy forcing Go 1.23 compatibility
+    cmds:
+      - go mod tidy -go=1.23.0
