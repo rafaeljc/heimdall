@@ -7,7 +7,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"os"
 	"os/signal"
@@ -18,12 +18,13 @@ import (
 
 	"github.com/rafaeljc/heimdall/internal/cache"
 	"github.com/rafaeljc/heimdall/internal/dataapi"
+	"github.com/rafaeljc/heimdall/internal/logger"
 )
 
 // main is the application entrypoint.
 func main() {
 	if err := run(); err != nil {
-		log.Printf("Fatal error: %v", err)
+		slog.Error("service exited with fatal error", "error", err)
 		os.Exit(1)
 	}
 }
@@ -33,7 +34,18 @@ func run() error {
 	appName := "heimdall-data-plane"
 	port := "50051" // Standard gRPC port
 
-	log.Printf("Starting %s service...", appName)
+	// -------------------------------------------------------------------------
+	// 0. Logger Setup
+	// -------------------------------------------------------------------------
+	logConfig := logger.NewConfig(
+		appName,
+		os.Getenv("APP_ENV"),
+		os.Getenv("LOG_LEVEL"),
+	)
+
+	logger.Setup(logConfig)
+
+	slog.Info("starting service", "port", port)
 
 	// -------------------------------------------------------------------------
 	// 1. Configuration
@@ -86,7 +98,7 @@ func run() error {
 	// dynamically without needing the .proto file locally.
 	reflection.Register(grpcServer)
 
-	log.Printf("gRPC Server listening on port %s", port)
+	slog.Info("server listening", "port", port)
 
 	// Start serving in a goroutine
 	errChan := make(chan error, 1)
@@ -107,7 +119,7 @@ func run() error {
 	case err := <-errChan:
 		return err
 	case <-sigChan:
-		log.Println("Shutdown signal received. Stopping gRPC server...")
+		slog.Info("shutdown signal received")
 	}
 
 	// GracefulStop waits for pending RPCs to finish before closing.
@@ -115,6 +127,6 @@ func run() error {
 	// For a more robust implementation, we could wrap this in a timeout select.
 	grpcServer.GracefulStop()
 
-	log.Println("Service exited successfully")
+	slog.Info("service exited successfully")
 	return nil
 }

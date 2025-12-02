@@ -2,7 +2,7 @@ package controlapi
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -70,7 +70,7 @@ func (a *API) handleCreateFlag(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// System Error: Internal Server Error
-		log.Printf("CRITICAL: failed to create flag in db: %v", err)
+		slog.Error("failed to create flag in db", "error", err)
 		render.Status(r, http.StatusInternalServerError)
 		render.JSON(w, r, ErrorResponse{
 			Code:    "ERR_INTERNAL",
@@ -146,7 +146,7 @@ func (a *API) handleListFlags(w http.ResponseWriter, r *http.Request) {
 	// 4. Call Repository
 	flags, totalItems, err := a.flags.ListFlags(r.Context(), pageSize, offset)
 	if err != nil {
-		log.Printf("CRITICAL: failed to list flags from db: %v", err)
+		slog.Error("failed to list flags from db", "error", err)
 
 		render.Status(r, http.StatusInternalServerError)
 		render.JSON(w, r, ErrorResponse{

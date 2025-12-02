@@ -7,7 +7,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -17,6 +17,7 @@ import (
 
 	"github.com/rafaeljc/heimdall/internal/controlapi"
 	"github.com/rafaeljc/heimdall/internal/database"
+	"github.com/rafaeljc/heimdall/internal/logger"
 	"github.com/rafaeljc/heimdall/internal/store"
 )
 
@@ -25,7 +26,7 @@ import (
 // based on the returned error to ensure proper integration with container orchestrators.
 func main() {
 	if err := run(); err != nil {
-		log.Printf("Fatal error: %v", err)
+		slog.Error("service exited with fatal error", "error", err)
 		os.Exit(1)
 	}
 }
@@ -37,7 +38,18 @@ func run() error {
 	appName := "heimdall-control-plane"
 	port := "8080"
 
-	log.Printf("Starting %s service...", appName)
+	// -------------------------------------------------------------------------
+	// 0. Logger Setup
+	// -------------------------------------------------------------------------
+	logConfig := logger.NewConfig(
+		appName,
+		os.Getenv("APP_ENV"),
+		os.Getenv("LOG_LEVEL"),
+	)
+
+	logger.Setup(logConfig)
+
+	slog.Info("starting service", "port", port)
 
 	// -------------------------------------------------------------------------
 	// 1. Database Connection Setup
@@ -87,7 +99,7 @@ func run() error {
 		return fmt.Errorf("failed to bind port %s: %w", port, err)
 	}
 
-	log.Printf("Listening on port %s", port)
+	slog.Info("server listening", "port", port)
 
 	// Start the HTTP server in a separate goroutine so it doesn't block the main thread.
 	// We use a buffered error channel to capture any startup failures (e.g., port closed after bind).
@@ -113,7 +125,7 @@ func run() error {
 	case err := <-errChan:
 		return err
 	case <-sigChan:
-		log.Println("Shutdown signal received. Cleaning up resources...")
+		slog.Info("shutdown signal received")
 	}
 
 	// Create a timeout context to force shutdown after 5 seconds if
@@ -125,6 +137,6 @@ func run() error {
 		return fmt.Errorf("server forced to shutdown: %w", err)
 	}
 
-	log.Println("Service exited successfully")
+	slog.Info("service exited successfully")
 	return nil
 }
