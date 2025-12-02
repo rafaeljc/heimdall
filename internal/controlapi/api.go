@@ -47,7 +47,7 @@ func (a *API) configureRoutes() {
 	// RealIP: correctly sets the IP if behind a proxy/LB.
 	a.Router.Use(middleware.RealIP)
 	// Logger: Logs request method, path, status, and duration.
-	a.Router.Use(middleware.Logger)
+	a.Router.Use(RequestLogger)
 	// Recoverer: Prevents the server from crashing on panics, returning 500 instead.
 	a.Router.Use(middleware.Recoverer)
 	// Content-Type: Forces JSON content type for API responses.
