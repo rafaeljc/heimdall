@@ -4,7 +4,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,20 +12,33 @@ import (
 
 	"github.com/rafaeljc/heimdall/internal/cache"
 	"github.com/rafaeljc/heimdall/internal/database"
+	"github.com/rafaeljc/heimdall/internal/logger"
 	"github.com/rafaeljc/heimdall/internal/store"
 	"github.com/rafaeljc/heimdall/internal/syncer"
 )
 
 func main() {
 	if err := run(); err != nil {
-		log.Printf("Fatal error: %v", err)
+		slog.Error("service exited with fatal error", "error", err)
 		os.Exit(1)
 	}
 }
 
 func run() error {
 	appName := "heimdall-syncer"
-	log.Printf("Starting %s...", appName)
+
+	// -------------------------------------------------------------------------
+	// 0. Logger Setup
+	// -------------------------------------------------------------------------
+	logConfig := logger.NewConfig(
+		appName,
+		os.Getenv("APP_ENV"),
+		os.Getenv("LOG_LEVEL"),
+	)
+
+	logger.Setup(logConfig)
+
+	slog.Info("starting service")
 
 	// -------------------------------------------------------------------------
 	// 1. Configuration
@@ -99,12 +112,12 @@ func run() error {
 	case err := <-errChan:
 		return fmt.Errorf("worker crashed: %w", err)
 	case <-sigChan:
-		log.Println("Shutdown signal received. Stopping worker...")
+		slog.Info("shutdown signal received")
 		cancel() // Cancels the context passed to worker.Run(), stopping the loop
 	}
 
 	// Give some time for cleanup if needed (though context cancel is usually enough)
 	time.Sleep(1 * time.Second)
-	log.Println("Worker exited successfully")
+	slog.Info("service exited successfully")
 	return nil
 }
