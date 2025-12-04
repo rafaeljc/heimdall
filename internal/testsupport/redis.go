@@ -1,0 +1,53 @@
+package testsupport
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/rafaeljc/heimdall/internal/cache"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/redis"
+)
+
+// RedisContainer holds references to the ephemeral Redis instance.
+type RedisContainer struct {
+	Container testcontainers.Container
+	// Client is the wrapped Heimdall cache service.
+	Client cache.Service
+}
+
+// Terminate cleans up the container and closes the client.
+func (c *RedisContainer) Terminate(ctx context.Context) error {
+	c.Client.Close()
+	return c.Container.Terminate(ctx)
+}
+
+// StartRedisContainer spins up a Redis 7-alpine container.
+func StartRedisContainer(ctx context.Context) (*RedisContainer, error) {
+	// 1. Start Container
+	redisContainer, err := redis.Run(ctx,
+		"redis:7-alpine",
+		// Wait until "Ready to accept connections" appears in logs
+		// or check port availability (redis module default).
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start redis container: %w", err)
+	}
+
+	// 2. Get Connection String
+	connStr, err := redisContainer.ConnectionString(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get redis connection string: %w", err)
+	}
+
+	// 3. Initialize Application Cache Client
+	cacheClient, err := cache.NewRedisCache(ctx, connStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create redis client: %w", err)
+	}
+
+	return &RedisContainer{
+		Container: redisContainer,
+		Client:    cacheClient,
+	}, nil
+}
