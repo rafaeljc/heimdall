@@ -47,12 +47,12 @@ tasks:
   test:unit:
     desc: Runs unit tests
     cmds:
-      - go test ./internal/... -v
+      - go test ./... -v
 
   test:integration:
     desc: Runs integration tests
     cmds:
-      - go test ./tests/integration/... -v -tags=integration
+      - go test ./... -v -tags=integration
 
   # --- BUILD (build:*) ---
   build:local:

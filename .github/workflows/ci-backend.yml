@@ -67,6 +67,10 @@ jobs:
         # Runs standard unit tests
         run: task test:unit
 
+      - name: Run Integration Tests
+        # Runs integration tests
+        run: task test:integration
+
       - name: Build Verification
         # Verifies that all microservices binaries compile successfully
         run: task build:local
