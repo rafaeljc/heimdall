@@ -5,6 +5,13 @@ package ruleengine
 
 import "encoding/json"
 
+// Rule Types (Discriminators).
+// Using constants avoids magic strings and typos in the codebase.
+const (
+	RuleTypeUserIDList = "USER_ID_LIST"
+	RuleTypePercentage = "PERCENTAGE"
+)
+
 // Context represents the input data regarding the entity requesting the flag.
 type Context struct {
 	// UserID is the primary identifier for the user/entity.
@@ -45,4 +52,8 @@ type Rule struct {
 	// - USER_ID_LIST: {"user_ids": ["a", "b"]}
 	// - PERCENTAGE:   {"percentage": 10, "attribute": "user_id"}
 	Value json.RawMessage `json:"value"`
+
+	// CompiledValue holds the pre-processed rule data (e.g., map[string]struct{}).
+	// This optimization allows O(1) lookups during evaluation.
+	CompiledValue any `json:"-"`
 }
