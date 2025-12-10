@@ -88,3 +88,46 @@ func TestNewConfig(t *testing.T) {
 		})
 	}
 }
+
+// TestNew verifies the Factory method.
+// Note: Since the logger writes to os.Stdout by default, we primarily test
+// that the factory returns a valid non-nil instance without panicking.
+func TestNew(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+	}{
+		{
+			name: "Should create a Production JSON Logger",
+			cfg: Config{
+				ServiceName: "prod-svc",
+				Environment: EnvProd,
+				Level:       slog.LevelInfo,
+			},
+		},
+		{
+			name: "Should create a Development Text Logger",
+			cfg: Config{
+				ServiceName: "dev-svc",
+				Environment: EnvDev,
+				Level:       slog.LevelDebug,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			logger := New(tt.cfg)
+
+			// Assert
+			assert.NotNil(t, logger, "Factory should return a valid logger instance")
+
+			// Smoke Test: Ensure it doesn't panic when logging
+			// (Output goes to stdout, so we don't assert the string content here)
+			assert.NotPanics(t, func() {
+				logger.Info("Smoke test log message")
+			})
+		})
+	}
+}

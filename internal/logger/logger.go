@@ -34,9 +34,9 @@ func NewConfig(serviceName, envStr, levelStr string) Config {
 	}
 }
 
-// Setup initializes the global logger based on the provided config.
-// It should be called once at the start of the application (main).
-func Setup(cfg Config) {
+// New creates and returns a new *slog.Logger instance based on the provided config.
+// It implements the Factory Pattern, encapsulating handler creation and attribute injection.
+func New(cfg Config) *slog.Logger {
 	var handler slog.Handler
 
 	opts := &slog.HandlerOptions{
@@ -57,14 +57,17 @@ func Setup(cfg Config) {
 		handler = slog.NewJSONHandler(os.Stdout, opts)
 	}
 
-	// Set the global default logger
+	// Create the logger instance
 	logger := slog.New(handler)
 
+	// Inject global attributes (Identity & Metadata)
+	// These will appear in every log line emitted by this logger instance or its children.
 	logger = logger.With(
 		slog.String("service", cfg.ServiceName),
 		slog.String("env", string(cfg.Environment)),
 	)
-	slog.SetDefault(logger)
+
+	return logger
 }
 
 // parseLevel converts a string to slog.Level. Defaults to INFO.
