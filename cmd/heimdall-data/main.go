@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
@@ -32,20 +33,30 @@ func main() {
 // run executes the service lifecycle.
 func run() error {
 	appName := "heimdall-data-plane"
-	port := "50051" // Standard gRPC port
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "50051"
+	}
+	appEnv := os.Getenv("APP_ENV")
+	logLevel := os.Getenv("LOG_LEVEL")
 
 	// -------------------------------------------------------------------------
 	// 0. Logger Setup
 	// -------------------------------------------------------------------------
-	logConfig := logger.NewConfig(
-		appName,
-		os.Getenv("APP_ENV"),
-		os.Getenv("LOG_LEVEL"),
+	logCfg := logger.NewConfig(appName, appEnv, logLevel)
+
+	log := logger.New(logCfg)
+
+	// Set Global Default.
+	// This ensures that:
+	// 1. The Interceptor uses the correct format when creating child loggers.
+	// 2. Any library using slog defaults respects our config.
+	slog.SetDefault(log)
+
+	log.Info("starting service",
+		slog.String("port", port),
+		slog.String("env", string(logCfg.Environment)),
 	)
-
-	logger.Setup(logConfig)
-
-	slog.Info("starting service", "port", port)
 
 	// -------------------------------------------------------------------------
 	// 1. Configuration
@@ -86,9 +97,15 @@ func run() error {
 		return fmt.Errorf("failed to bind port %s: %w", port, err)
 	}
 
+	// Define Server Options (Interceptors)
+	opts := []grpc.ServerOption{
+		// Chain the logging interceptor.
+		// This generates the Request ID and injects the logger into the Context.
+		grpc.UnaryInterceptor(dataapi.RequestLoggerInterceptor()),
+	}
+
 	// Initialize the gRPC Server
-	// In the future, we can add Interceptors here (Logging, Auth, Metrics)
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(opts...)
 
 	// Register our implementation with the server engine
 	api.Register(grpcServer)
@@ -98,7 +115,7 @@ func run() error {
 	// dynamically without needing the .proto file locally.
 	reflection.Register(grpcServer)
 
-	slog.Info("server listening", "port", port)
+	log.Info("server listening", slog.String("address", listener.Addr().String()))
 
 	// Start serving in a goroutine
 	errChan := make(chan error, 1)
@@ -118,15 +135,26 @@ func run() error {
 	select {
 	case err := <-errChan:
 		return err
-	case <-sigChan:
-		slog.Info("shutdown signal received")
+	case sig := <-sigChan:
+		log.Info("shutdown signal received", slog.String("signal", sig.String()))
 	}
 
-	// GracefulStop waits for pending RPCs to finish before closing.
-	// Unlike HTTP, it doesn't take a Context/Timeout, it blocks until done.
-	// For a more robust implementation, we could wrap this in a timeout select.
-	grpcServer.GracefulStop()
+	// Graceful Shutdown with Timeout
+	// gRPC GracefulStop waits indefinitely for active RPCs. We enforce a limit.
+	stopped := make(chan struct{})
+	go func() {
+		grpcServer.GracefulStop()
+		close(stopped)
+	}()
 
-	slog.Info("service exited successfully")
+	t := time.NewTimer(5 * time.Second)
+	select {
+	case <-stopped:
+		log.Info("service exited successfully")
+	case <-t.C:
+		log.Warn("shutdown timed out, forcing stop")
+		grpcServer.Stop()
+	}
+
 	return nil
 }
