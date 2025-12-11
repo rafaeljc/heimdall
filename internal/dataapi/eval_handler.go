@@ -6,9 +6,10 @@ package dataapi
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"strconv"
 
+	"github.com/rafaeljc/heimdall/internal/logger"
 	pb "github.com/rafaeljc/heimdall/proto/heimdall/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -26,23 +27,35 @@ import (
 //   - INVALID_ARGUMENT if the flag key is missing.
 //   - INTERNAL if there is a connectivity issue with the cache.
 func (a *API) Evaluate(ctx context.Context, req *pb.EvaluateRequest) (*pb.EvaluateResponse, error) {
+	log := logger.FromContext(ctx)
+
 	// 1. Input Validation (Fail Fast)
 	if req.FlagKey == "" {
+		// Log as Warn because it's a client error, not a server failure.
+		log.Warn("bad request: missing flag_key")
 		return nil, status.Error(codes.InvalidArgument, "flag_key is required")
 	}
+
+	// Trace the evaluation attempt (Debug level for high-throughput)
+	log.Debug("evaluating flag", slog.String("flag_key", req.FlagKey))
 
 	// 2. Retrieve from L2 Cache (Redis)
 	// In the future (V2), this step will be preceded by an L1 memory cache lookup.
 	rawMap, err := a.cache.GetFlag(ctx, req.FlagKey)
 	if err != nil {
 		// Log the internal error so SREs can debug connectivity issues.
-		// We return a generic Internal error to the client.
-		log.Printf("CRITICAL: failed to fetch flag %q from cache: %v", req.FlagKey, err)
+		// We use structured logging to capture the error details clearly.
+		log.Error("failed to fetch flag from cache",
+			slog.String("flag_key", req.FlagKey),
+			slog.String("error", err.Error()),
+		)
 		return nil, status.Errorf(codes.Internal, "failed to fetch flag configuration")
 	}
 
 	// Redis HGETALL returns an empty map (not nil) if the key does not exist.
 	if len(rawMap) == 0 {
+		// Debug log is enough here; NotFound is a valid business state.
+		log.Debug("flag not found in cache", slog.String("flag_key", req.FlagKey))
 		return nil, status.Errorf(codes.NotFound, "flag %q not found", req.FlagKey)
 	}
 

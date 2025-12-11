@@ -4,7 +4,7 @@ package syncer
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/rafaeljc/heimdall/internal/cache"
@@ -19,13 +19,18 @@ type Config struct {
 
 // Service orchestrates the synchronization process.
 type Service struct {
+	logger *slog.Logger
 	config Config
 	repo   store.FlagRepository
 	cache  cache.Service
 }
 
 // New creates a new Syncer service.
-func New(cfg Config, repo store.FlagRepository, cacheSvc cache.Service) *Service {
+func New(logger *slog.Logger, cfg Config, repo store.FlagRepository, cacheSvc cache.Service) *Service {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	if repo == nil {
 		panic("syncer: flag repository cannot be nil")
 	}
@@ -38,6 +43,7 @@ func New(cfg Config, repo store.FlagRepository, cacheSvc cache.Service) *Service
 	}
 
 	return &Service{
+		logger: logger,
 		config: cfg,
 		repo:   repo,
 		cache:  cacheSvc,
@@ -46,26 +52,26 @@ func New(cfg Config, repo store.FlagRepository, cacheSvc cache.Service) *Service
 
 // Run starts the syncer loop. It blocks until the context is cancelled.
 func (s *Service) Run(ctx context.Context) error {
-	log.Printf("Starting Syncer (Polling Interval: %s)", s.config.Interval)
+	s.logger.Info("starting syncer service", slog.String("interval", s.config.Interval.String()))
 
 	ticker := time.NewTicker(s.config.Interval)
 	defer ticker.Stop()
 
 	// Run once immediately on startup
 	if err := s.sync(ctx); err != nil {
-		log.Printf("Error in initial sync: %v", err)
+		s.logger.Error("initial sync failed", slog.String("error", err.Error()))
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Syncer stopping...")
+			s.logger.Info("syncer service stopping...")
 			return nil
 		case <-ticker.C:
 			if err := s.sync(ctx); err != nil {
 				// We log the error but don't stop the worker.
 				// Retry on next tick.
-				log.Printf("Error syncing flags: %v", err)
+				s.logger.Error("sync cycle failed", slog.String("error", err.Error()))
 			}
 		}
 	}
@@ -73,6 +79,8 @@ func (s *Service) Run(ctx context.Context) error {
 
 // sync performs a single synchronization cycle.
 func (s *Service) sync(ctx context.Context) error {
+	start := time.Now()
+
 	// 1. Read from Source of Truth (Postgres)
 	flags, err := s.repo.ListAllFlags(ctx)
 	if err != nil {
@@ -82,6 +90,8 @@ func (s *Service) sync(ctx context.Context) error {
 	// 2. Write to Data Plane Cache (Redis)
 	// In V1, we overwrite the keys.
 	count := 0
+	errorCount := 0
+
 	for _, f := range flags {
 		// Serialize the flag for Redis.
 		// For V1, we just store the basic fields needed for evaluation.
@@ -95,14 +105,22 @@ func (s *Service) sync(ctx context.Context) error {
 		}
 
 		if err := s.cache.SetFlag(ctx, f.Key, flagData); err != nil {
-			log.Printf("Failed to sync flag %s: %v", f.Key, err)
+			s.logger.Warn("failed to sync flag",
+				slog.String("key", f.Key),
+				slog.String("error", err.Error()),
+			)
+			errorCount++
 			continue // Try next flag, don't abort entire batch
 		}
 		count++
 	}
 
-	if count > 0 {
-		log.Printf("Synced %d flags to Redis", count)
+	if count > 0 || errorCount > 0 {
+		s.logger.Info("sync cycle completed",
+			slog.Int("synced", count),
+			slog.Int("errors", errorCount),
+			slog.String("duration", time.Since(start).String()),
+		)
 	}
 	return nil
 }

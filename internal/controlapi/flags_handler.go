@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/render"
+	"github.com/rafaeljc/heimdall/internal/logger"
 	"github.com/rafaeljc/heimdall/internal/store"
 )
 
@@ -22,9 +23,12 @@ import (
 // 5. Handles specific persistence errors (e.g., conflicts).
 // 6. Returns the created resource with a 201 Created status.
 func (a *API) handleCreateFlag(w http.ResponseWriter, r *http.Request) {
+	log := logger.FromContext(r.Context())
+
 	// 1. Decode Request
 	var req CreateFlagRequest
 	if err := render.DecodeJSON(r.Body, &req); err != nil {
+		log.Warn("invalid json payload", slog.String("error", err.Error()))
 		render.Status(r, http.StatusBadRequest)
 		render.JSON(w, r, ErrorResponse{
 			Code:    "ERR_INVALID_JSON",
@@ -70,7 +74,7 @@ func (a *API) handleCreateFlag(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// System Error: Internal Server Error
-		slog.Error("failed to create flag in db", "error", err)
+		log.Error("failed to create flag in db", "error", err)
 		render.Status(r, http.StatusInternalServerError)
 		render.JSON(w, r, ErrorResponse{
 			Code:    "ERR_INTERNAL",
@@ -93,6 +97,7 @@ func (a *API) handleCreateFlag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 6. Return Success
+	log.Info("flag created successfully", slog.String("flag_key", flag.Key), slog.Int64("flag_id", flag.ID))
 	render.Status(r, http.StatusCreated)
 	render.JSON(w, r, resp)
 }
@@ -106,6 +111,8 @@ func (a *API) handleCreateFlag(w http.ResponseWriter, r *http.Request) {
 // 4. Calculates pagination metadata (total pages).
 // 5. Returns the PaginatedResponse.
 func (a *API) handleListFlags(w http.ResponseWriter, r *http.Request) {
+	log := logger.FromContext(r.Context())
+
 	// 1. Parse Query Parameters (Type Validation)
 	// We return 400 Bad Request if the user sends invalid types (e.g., page=banana).
 	page, err := parseOptionalInt(r, "page", 1)
@@ -146,7 +153,7 @@ func (a *API) handleListFlags(w http.ResponseWriter, r *http.Request) {
 	// 4. Call Repository
 	flags, totalItems, err := a.flags.ListFlags(r.Context(), pageSize, offset)
 	if err != nil {
-		slog.Error("failed to list flags from db", "error", err)
+		log.Error("failed to list flags from db", slog.String("error", err.Error()))
 
 		render.Status(r, http.StatusInternalServerError)
 		render.JSON(w, r, ErrorResponse{
