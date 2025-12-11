@@ -26,19 +26,22 @@ func main() {
 
 func run() error {
 	appName := "heimdall-syncer"
+	appEnv := os.Getenv("APP_ENV")
+	logLevel := os.Getenv("LOG_LEVEL")
 
 	// -------------------------------------------------------------------------
 	// 0. Logger Setup
 	// -------------------------------------------------------------------------
-	logConfig := logger.NewConfig(
-		appName,
-		os.Getenv("APP_ENV"),
-		os.Getenv("LOG_LEVEL"),
-	)
+	logCfg := logger.NewConfig(appName, appEnv, logLevel)
 
-	logger.Setup(logConfig)
+	log := logger.New(logCfg)
 
-	slog.Info("starting service")
+	// Set Global Default
+	// Crucial so that 'slog.Info' calls within this file use the correct format
+	// and libraries that rely on global slog conform to our standard.
+	slog.SetDefault(log)
+
+	log.Info("starting service")
 
 	// -------------------------------------------------------------------------
 	// 1. Configuration
@@ -50,6 +53,16 @@ func run() error {
 	redisURL := os.Getenv("REDIS_URL")
 	if redisURL == "" {
 		return fmt.Errorf("REDIS_URL environment variable is required")
+	}
+
+	// Default polling interval
+	syncInterval := 10 * time.Second
+	if val := os.Getenv("SYNC_INTERVAL"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			syncInterval = d
+		} else {
+			log.Warn("invalid SYNC_INTERVAL, using default", slog.String("value", val))
+		}
 	}
 
 	// Create a background context that we can cancel on shutdown
@@ -83,8 +96,9 @@ func run() error {
 
 	// Layer 2: Service Logic
 	worker := syncer.New(
+		log,
 		syncer.Config{
-			Interval: 10 * time.Second, // Poll every 10s
+			Interval: syncInterval,
 		},
 		flagRepo,
 		redisCache,
@@ -111,13 +125,15 @@ func run() error {
 	select {
 	case err := <-errChan:
 		return fmt.Errorf("worker crashed: %w", err)
-	case <-sigChan:
-		slog.Info("shutdown signal received")
+	case sig := <-sigChan:
+		log.Info("shutdown signal received", slog.String("signal", sig.String()))
 		cancel() // Cancels the context passed to worker.Run(), stopping the loop
 	}
 
-	// Give some time for cleanup if needed (though context cancel is usually enough)
-	time.Sleep(1 * time.Second)
-	slog.Info("service exited successfully")
+	// Give some time for cleanup if needed
+	// (The worker should return quickly after context cancellation)
+	time.Sleep(500 * time.Millisecond)
+
+	log.Info("service exited successfully")
 	return nil
 }

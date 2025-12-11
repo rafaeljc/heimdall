@@ -13,6 +13,12 @@ import (
 type API struct {
 	pb.UnimplementedDataPlaneServer
 	cache cache.Service
+
+	// Architecture Note:
+	// We deliberately do NOT inject a *slog.Logger struct field here.
+	// Since gRPC is request-scoped, handlers (in eval_handler.go) must retrieve
+	// the logger from the context using logger.FromContext(ctx) to ensure
+	// logs are correlated with the correct Request ID.
 }
 
 // NewAPI creates a new Data Plane gRPC API instance.

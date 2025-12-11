@@ -36,20 +36,31 @@ func main() {
 // (like database cleanup) to execute properly before the process terminates.
 func run() error {
 	appName := "heimdall-control-plane"
-	port := "8080"
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	appEnv := os.Getenv("APP_ENV")
+	logLevel := os.Getenv("LOG_LEVEL")
 
 	// -------------------------------------------------------------------------
 	// 0. Logger Setup
 	// -------------------------------------------------------------------------
-	logConfig := logger.NewConfig(
-		appName,
-		os.Getenv("APP_ENV"),
-		os.Getenv("LOG_LEVEL"),
+	logCfg := logger.NewConfig(appName, appEnv, logLevel)
+
+	// Create the logger instance
+	log := logger.New(logCfg)
+
+	// Set Global Default.
+	// This ensures that:
+	// 1. All slog.Info/Error calls in this file use the configured format (JSON/Text).
+	// 2. The HTTP Middleware (controlapi) can derive child loggers from this default.
+	slog.SetDefault(log)
+
+	log.Info("starting service",
+		slog.String("port", port),
+		slog.String("env", string(logCfg.Environment)),
 	)
-
-	logger.Setup(logConfig)
-
-	slog.Info("starting service", "port", port)
 
 	// -------------------------------------------------------------------------
 	// 1. Database Connection Setup
@@ -89,6 +100,9 @@ func run() error {
 		Addr:              ":" + port,
 		Handler:           api.Router,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// Create the Listener explicitly before starting the server.
@@ -99,7 +113,7 @@ func run() error {
 		return fmt.Errorf("failed to bind port %s: %w", port, err)
 	}
 
-	slog.Info("server listening", "port", port)
+	log.Info("server listening", slog.String("address", listener.Addr().String()))
 
 	// Start the HTTP server in a separate goroutine so it doesn't block the main thread.
 	// We use a buffered error channel to capture any startup failures (e.g., port closed after bind).
@@ -124,8 +138,8 @@ func run() error {
 	select {
 	case err := <-errChan:
 		return err
-	case <-sigChan:
-		slog.Info("shutdown signal received")
+	case sig := <-sigChan:
+		log.Info("shutdown signal received", slog.String("signal", sig.String()))
 	}
 
 	// Create a timeout context to force shutdown after 5 seconds if
@@ -137,6 +151,6 @@ func run() error {
 		return fmt.Errorf("server forced to shutdown: %w", err)
 	}
 
-	slog.Info("service exited successfully")
+	log.Info("service exited successfully")
 	return nil
 }
