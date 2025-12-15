@@ -3,6 +3,7 @@
 package controlapi
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 	"time"
@@ -32,6 +33,12 @@ type Flag struct {
 
 	// DefaultValue is the fallback return when enabled but no rule matches.
 	DefaultValue bool `json:"default_value"`
+
+	// Rules is the ordered list of targeting strategies (JSONB).
+	Rules json.RawMessage `json:"rules"`
+
+	// Version is the monotonic counter for optimistic locking.
+	Version int64 `json:"version"`
 
 	// CreatedAt is the timestamp of creation in UTC.
 	CreatedAt time.Time `json:"created_at"`
@@ -102,6 +109,10 @@ type CreateFlagRequest struct {
 
 	// DefaultValue defaults to false if omitted.
 	DefaultValue bool `json:"default_value"`
+
+	// Rules is the optional list of targeting rules for this flag.
+	// Allow it to be omitted or null in the payload.
+	Rules json.RawMessage `json:"rules,omitempty"`
 }
 
 // Sanitize cleans up input data by trimming whitespace and normalizing case.
@@ -121,6 +132,16 @@ func (r *CreateFlagRequest) Validate() *ErrorResponse {
 
 	if err := validateFlagName(r.Name); err != nil {
 		return err
+	}
+
+	if len(r.Rules) > 0 {
+		var rules map[string]interface{}
+		if err := json.Unmarshal(r.Rules, &rules); err != nil {
+			return &ErrorResponse{
+				Code:    "ERR_INVALID_INPUT",
+				Message: "Rules must be a valid JSON array or object (empty for now)",
+			}
+		}
 	}
 
 	return nil
