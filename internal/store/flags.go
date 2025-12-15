@@ -10,6 +10,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/rafaeljc/heimdall/internal/ruleengine"
 )
 
 // Compile-time check to verify that PostgresStore implements FlagRepository.
@@ -19,14 +21,23 @@ var _ FlagRepository = (*PostgresStore)(nil)
 // Flag represents the database schema for a feature flag.
 // It mirrors the 'flags' table structure.
 type Flag struct {
-	ID           int64     `db:"id"`
-	Key          string    `db:"key"`
-	Name         string    `db:"name"`
-	Description  string    `db:"description"`
-	Enabled      bool      `db:"enabled"`
-	DefaultValue bool      `db:"default_value"`
-	CreatedAt    time.Time `db:"created_at"`
-	UpdatedAt    time.Time `db:"updated_at"`
+	ID           int64  `db:"id"`
+	Key          string `db:"key"`
+	Name         string `db:"name"`
+	Description  string `db:"description"`
+	Enabled      bool   `db:"enabled"`
+	DefaultValue bool   `db:"default_value"`
+
+	// Rules stores the complex targeting logic (JSONB in DB).
+	// pgx handles the mapping from JSONB to this slice automatically.
+	Rules []ruleengine.Rule `db:"rules"`
+
+	// Version is used for optimistic locking to prevent lost updates
+	// in the distributed system (Redis overwrites).
+	Version int64 `db:"version"`
+
+	CreatedAt time.Time `db:"created_at"`
+	UpdatedAt time.Time `db:"updated_at"`
 }
 
 // FlagRepository defines the interface for flag persistence operations.
@@ -60,10 +71,18 @@ func NewPostgresStore(db *pgxpool.Pool) *PostgresStore {
 // CreateFlag inserts a new flag into the database.
 // It uses the RETURNING clause to get the server-generated ID and timestamps efficiently.
 func (s *PostgresStore) CreateFlag(ctx context.Context, f *Flag) error {
+	// Ensure Rules is not nil to avoid DB constraint errors if the driver behaves strictly,
+	// though our migration sets DEFAULT '[]'.
+	if f.Rules == nil {
+		f.Rules = []ruleengine.Rule{}
+	}
+
+	// We do NOT insert 'version' explicitly, letting the DB set DEFAULT 1.
+	// We scan it back via RETURNING to keep the struct in sync.
 	query := `
-		INSERT INTO flags (key, name, description, enabled, default_value)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, created_at, updated_at
+		INSERT INTO flags (key, name, description, enabled, default_value, rules)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, version, created_at, updated_at
 	`
 
 	// Execute query and map return values directly to the struct fields
@@ -73,7 +92,8 @@ func (s *PostgresStore) CreateFlag(ctx context.Context, f *Flag) error {
 		f.Description,
 		f.Enabled,
 		f.DefaultValue,
-	).Scan(&f.ID, &f.CreatedAt, &f.UpdatedAt)
+		f.Rules, // pgx automatically marshals this to JSONB
+	).Scan(&f.ID, &f.Version, &f.CreatedAt, &f.UpdatedAt)
 
 	if err != nil {
 		// Handle specific database errors explicitly.
@@ -110,7 +130,7 @@ func (s *PostgresStore) ListFlags(ctx context.Context, limit, offset int) ([]*Fl
 
 	// 2. Get Data
 	query := `
-		SELECT id, key, name, description, enabled, default_value, created_at, updated_at
+		SELECT id, key, name, description, enabled, default_value, rules, version, created_at, updated_at
 		FROM flags
 		ORDER BY id DESC
 		LIMIT $1 OFFSET $2
@@ -135,6 +155,8 @@ func (s *PostgresStore) ListFlags(ctx context.Context, limit, offset int) ([]*Fl
 			&f.Description,
 			&f.Enabled,
 			&f.DefaultValue,
+			&f.Rules,
+			&f.Version,
 			&f.CreatedAt,
 			&f.UpdatedAt,
 		); err != nil {
@@ -155,7 +177,7 @@ func (s *PostgresStore) ListFlags(ctx context.Context, limit, offset int) ([]*Fl
 // For the V1 "Walking Skeleton", fetching all is acceptable.
 func (s *PostgresStore) ListAllFlags(ctx context.Context) ([]*Flag, error) {
 	query := `
-		SELECT id, key, name, description, enabled, default_value, created_at, updated_at
+		SELECT id, key, name, description, enabled, default_value, rules, version, created_at, updated_at
 		FROM flags
 		ORDER BY id ASC
 	`
@@ -176,6 +198,8 @@ func (s *PostgresStore) ListAllFlags(ctx context.Context) ([]*Flag, error) {
 			&f.Description,
 			&f.Enabled,
 			&f.DefaultValue,
+			&f.Rules,
+			&f.Version,
 			&f.CreatedAt,
 			&f.UpdatedAt,
 		); err != nil {

@@ -9,7 +9,9 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
+	"github.com/rafaeljc/heimdall/internal/ruleengine"
 	"github.com/rafaeljc/heimdall/internal/store"
 	"github.com/rafaeljc/heimdall/internal/testsupport"
 	"github.com/stretchr/testify/assert"
@@ -42,7 +44,7 @@ func TestPostgresStore_Integration(t *testing.T) {
 	// 2. Scenarios
 	// We run these sequentially as they share the same container state.
 
-	t.Run("CreateFlag_Success", func(t *testing.T) {
+	t.Run("CreateFlag_Success_WithDefaults", func(t *testing.T) {
 		// Arrange
 		inputFlag := &store.Flag{
 			Key:          "integration-test-flag",
@@ -50,6 +52,7 @@ func TestPostgresStore_Integration(t *testing.T) {
 			Description:  "Created via Testcontainers",
 			Enabled:      true,
 			DefaultValue: true,
+			// Rules is nil here to test default behavior
 		}
 
 		// Act
@@ -61,11 +64,16 @@ func TestPostgresStore_Integration(t *testing.T) {
 		assert.False(t, inputFlag.CreatedAt.IsZero(), "expected DB to assign CreatedAt")
 		assert.False(t, inputFlag.UpdatedAt.IsZero(), "expected DB to assign UpdatedAt")
 
-		// Assert 2: Deep Verification
+		// Assert 2: Milestone 2 Defaults
+		assert.Equal(t, int64(1), inputFlag.Version, "new flags must start at Version 1")
+		assert.NotNil(t, inputFlag.Rules, "Rules should be initialized to empty slice")
+		assert.Empty(t, inputFlag.Rules, "Rules should be empty")
+
+		// Assert 3: Deep Verification
 		// We query the DB directly to prove persistence and data integrity.
 		var persistedFlag store.Flag
 		query := `
-			SELECT key, name, description, enabled, default_value 
+			SELECT key, name, description, enabled, default_value, rules, version
 			FROM flags 
 			WHERE id = $1
 		`
@@ -75,6 +83,8 @@ func TestPostgresStore_Integration(t *testing.T) {
 			&persistedFlag.Description,
 			&persistedFlag.Enabled,
 			&persistedFlag.DefaultValue,
+			&persistedFlag.Rules,
+			&persistedFlag.Version,
 		)
 		require.NoError(t, err, "failed to fetch created flag from DB for verification")
 
@@ -84,6 +94,48 @@ func TestPostgresStore_Integration(t *testing.T) {
 		assert.Equal(t, inputFlag.Description, persistedFlag.Description)
 		assert.Equal(t, inputFlag.Enabled, persistedFlag.Enabled)
 		assert.Equal(t, inputFlag.DefaultValue, persistedFlag.DefaultValue)
+		assert.Equal(t, int64(1), persistedFlag.Version)
+		assert.Empty(t, persistedFlag.Rules)
+	})
+
+	t.Run("CreateFlag_Success_WithRules", func(t *testing.T) {
+		// Arrange: Create a flag WITH targeting rules
+		rules := []ruleengine.Rule{
+			{
+				ID:   "rule-1",
+				Type: ruleengine.RuleTypeUserIDList,
+				// We don't need real JSON content for DB test, just valid structure
+			},
+		}
+
+		inputFlag := &store.Flag{
+			Key:   "flag-with-rules-" + fmt.Sprint(time.Now().UnixNano()),
+			Name:  "Flag Rules",
+			Rules: rules,
+		}
+
+		// Act
+		err := repo.CreateFlag(ctx, inputFlag)
+
+		// Assert
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), inputFlag.Version)
+
+		// Fetch back to verify JSONB round-trip
+		var persistedRules []ruleengine.Rule
+		query := `
+			SELECT rules
+			FROM flags 
+			WHERE id = $1
+		`
+		err = pgContainer.DB.QueryRow(ctx, query, inputFlag.ID).Scan(
+			&persistedRules,
+		)
+		require.NoError(t, err)
+
+		require.Len(t, persistedRules, 1)
+		assert.Equal(t, "rule-1", persistedRules[0].ID)
+		assert.Equal(t, ruleengine.RuleTypeUserIDList, persistedRules[0].Type)
 	})
 
 	t.Run("CreateFlag_DuplicateKey_ShouldFail", func(t *testing.T) {

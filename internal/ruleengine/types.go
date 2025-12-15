@@ -57,3 +57,25 @@ type Rule struct {
 	// This optimization allows O(1) lookups during evaluation.
 	CompiledValue any `json:"-"`
 }
+
+// FeatureFlag represents the complete configuration of a flag needed for evaluation.
+// This struct serves as the schema for the JSON stored in Redis and the Rule Engine's input.
+type FeatureFlag struct {
+	// Key is the unique string identifier (e.g., "new-checkout-flow").
+	Key string `json:"key"`
+
+	// Enabled is the global kill-switch.
+	// If false, the engine immediately returns DefaultValue without checking rules.
+	Enabled bool `json:"enabled"`
+
+	// DefaultValue is returned if Enabled is false OR if no rules match.
+	DefaultValue bool `json:"default_value"`
+
+	// Rules is the ordered list of targeting strategies.
+	// The engine evaluates them sequentially (0, 1, 2...). First match wins.
+	Rules []Rule `json:"rules"`
+
+	// Version is the monotonic counter for optimistic locking.
+	// It ensures that older updates do not overwrite newer ones in Redis.
+	Version int64 `json:"version"`
+}
