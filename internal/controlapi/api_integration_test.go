@@ -85,6 +85,11 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 		assert.NotZero(t, resp.ID, "Server must generate ID")
 		assert.False(t, resp.CreatedAt.IsZero(), "Server must generate CreatedAt")
 		assert.False(t, resp.UpdatedAt.IsZero(), "Server must generate UpdatedAt")
+
+		// Validate Rules & Versioning
+		assert.Equal(t, int64(1), resp.Version, "New flags must start at Version 1")
+		assert.JSONEq(t, "[]", string(resp.Rules), "Rules should be an empty JSON array []")
+
 	})
 
 	t.Run("POST /flags - Happy Path (Defaults Check)", func(t *testing.T) {
@@ -110,6 +115,8 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 		// Validate "Secure by Default" behavior
 		assert.False(t, resp.Enabled, "should default to disabled (false)")
 		assert.False(t, resp.DefaultValue, "should default to false")
+		assert.Equal(t, int64(1), resp.Version)
+		assert.JSONEq(t, "[]", string(resp.Rules))
 	})
 
 	t.Run("POST /flags - Validation & Type Safety", func(t *testing.T) {
