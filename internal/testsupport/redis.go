@@ -35,13 +35,13 @@ func StartRedisContainer(ctx context.Context) (*RedisContainer, error) {
 	}
 
 	// 2. Get Connection String
-	connStr, err := redisContainer.ConnectionString(ctx)
+	endpoint, err := redisContainer.PortEndpoint(ctx, "6379/tcp", "")
 	if err != nil {
-		return nil, fmt.Errorf("failed to get redis connection string: %w", err)
+		return nil, fmt.Errorf("failed to get redis endpoint: %w", err)
 	}
 
 	// 3. Initialize Application Cache Client
-	cacheClient, err := cache.NewRedisCache(ctx, connStr)
+	cacheClient, err := cache.NewRedisCache(ctx, endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create redis client: %w", err)
 	}

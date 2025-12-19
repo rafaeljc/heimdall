@@ -5,24 +5,86 @@ package cache
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 
-// KeyPrefix is the namespace used for all flag keys in Redis.
-// Example: "flag:new-checkout-flow"
-const KeyPrefix = "flag"
+const (
+	KeyPrefix          = "heimdall:flag"
+	UpdateQueueKey     = "heimdall:queue:updates"
+	ProcessingQueueKey = "heimdall:queue:processing"
+	DLQKey             = "heimdall:queue:dlq"
+	HydrationMarkerKey = "heimdall:sys:hydrated"
+
+	// Lua script for Optimistic Locking.
+	// Returns:
+	// 0: Skipped (stale version)
+	// 1: Updated (success)
+	// 2: Repaired (corrupted data fixed)
+	optimisticSetScript = `
+		local key = KEYS[1]
+		local new_val = ARGV[1]
+		local new_ver = tonumber(ARGV[2])
+
+		local curr_val = redis.call("GET", key)
+		
+		-- Case 1: New Key
+		if not curr_val then
+			redis.call("SET", key, new_val)
+			return 1
+		end
+
+		-- Case 2: Corrupted/Legacy Data Check
+		local pipe_pos = string.find(curr_val, "|")
+		if not pipe_pos then
+			redis.call("SET", key, new_val)
+			return 2 
+		end
+
+		local curr_ver = tonumber(string.sub(curr_val, 1, pipe_pos - 1))
+
+		-- Case 3: Version Check
+		if new_ver > curr_ver then
+			redis.call("SET", key, new_val)
+			return 1
+		end
+
+		return 0
+	`
+)
+
+type SetResult int
+
+const (
+	SetResultSkipped  SetResult = 0
+	SetResultUpdated  SetResult = 1
+	SetResultRepaired SetResult = 2
+)
+
+var ErrQueueTimeout = errors.New("queue timeout")
 
 // Service defines the interface for cache operations.
 // This interface allows for dependency injection and mocking in tests.
 type Service interface {
-	// SetFlag updates the hash fields for a specific flag.
-	SetFlag(ctx context.Context, key string, fields map[string]interface{}) error
+	// SetFlagSafely sets the flag data with optimistic locking based on version.
+	SetFlagSafely(ctx context.Context, key string, value interface{}, version int64) (SetResult, error)
 
 	// GetFlag retrieves all fields for a specific flag hash.
 	GetFlag(ctx context.Context, key string) (map[string]string, error)
+
+	// Queue
+	PublishUpdate(ctx context.Context, flagKey string) error
+	WaitForUpdate(ctx context.Context, timeout time.Duration) (string, error)
+	AckUpdate(ctx context.Context, flagKey string) error
+	MoveToDLQ(ctx context.Context, flagKey string) error
+
+	// Resilience
+	MarkAsHydrated(ctx context.Context) error
+	IsHydrated(ctx context.Context) (bool, error)
 
 	// HealthCheck pings the redis server to ensure connectivity.
 	HealthCheck(ctx context.Context) error
@@ -34,6 +96,7 @@ type Service interface {
 // RedisCache implements CacheService using the go-redis library.
 type RedisCache struct {
 	client *redis.Client
+	script *redis.Script
 }
 
 // NewRedisCache initializes a new Redis client.
@@ -46,7 +109,7 @@ func NewRedisCache(ctx context.Context, addr string) (*RedisCache, error) {
 		Addr: addr,
 		// Timeouts prevent cascading failures
 		DialTimeout:  5 * time.Second,
-		ReadTimeout:  3 * time.Second,
+		ReadTimeout:  30 * time.Second, // Should be longer than BLMOVE timeout
 		WriteTimeout: 3 * time.Second,
 		// Connection Pool settings
 		PoolSize:     10,
@@ -63,20 +126,28 @@ func NewRedisCache(ctx context.Context, addr string) (*RedisCache, error) {
 		return nil, fmt.Errorf("failed to connect to redis: %w", err)
 	}
 
-	return &RedisCache{client: client}, nil
+	return &RedisCache{
+		client: client,
+		script: redis.NewScript(optimisticSetScript),
+	}, nil
 }
 
-// SetFlag stores the flag data as a Hash in Redis (HSET).
-func (c *RedisCache) SetFlag(ctx context.Context, key string, fields map[string]interface{}) error {
+// SetFlagSafely sets the flag data in Redis using optimistic locking based on version.
+func (c *RedisCache) SetFlagSafely(ctx context.Context, key string, value interface{}, version int64) (SetResult, error) {
 	redisKey := fmt.Sprintf("%s:%s", KeyPrefix, key)
-
-	// Using HSet to store the map directly.
-	// go-redis handles the serialization of basic types (string, bool, int).
-	if err := c.client.HSet(ctx, redisKey, fields).Err(); err != nil {
-		return fmt.Errorf("failed to set flag %q in cache: %w", key, err)
+	jsonBytes, err := json.Marshal(value)
+	if err != nil {
+		return 0, fmt.Errorf("marshal error: %w", err)
 	}
 
-	return nil
+	storageValue := fmt.Sprintf("%d|%s", version, string(jsonBytes))
+
+	res, err := c.script.Run(ctx, c.client, []string{redisKey}, storageValue, version).Int()
+	if err != nil {
+		return 0, fmt.Errorf("lua execution error: %w", err)
+	}
+
+	return SetResult(res), nil
 }
 
 // GetFlag retrieves all fields from the Redis hash.
@@ -92,6 +163,49 @@ func (c *RedisCache) GetFlag(ctx context.Context, key string) (map[string]string
 	}
 
 	return result, nil
+}
+
+// PublishUpdate adds a flag key to the update queue.
+func (c *RedisCache) PublishUpdate(ctx context.Context, flagKey string) error {
+	return c.client.LPush(ctx, UpdateQueueKey, flagKey).Err()
+}
+
+// WaitForUpdate blocks until a flag key is available in the update queue or timeout occurs.
+func (c *RedisCache) WaitForUpdate(ctx context.Context, timeout time.Duration) (string, error) {
+	// BLMOVE atomicamente move da fila de Updates para Processing
+	val, err := c.client.BLMove(ctx, UpdateQueueKey, ProcessingQueueKey, "RIGHT", "LEFT", timeout).Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return "", ErrQueueTimeout
+		}
+		return "", err
+	}
+	return val, nil
+}
+
+// AckUpdate removes a flag key from the processing queue after successful processing.
+func (c *RedisCache) AckUpdate(ctx context.Context, flagKey string) error {
+	return c.client.LRem(ctx, ProcessingQueueKey, 1, flagKey).Err()
+}
+
+// MoveToDLQ moves a flag key from the processing queue to the dead-letter queue.
+func (c *RedisCache) MoveToDLQ(ctx context.Context, flagKey string) error {
+	_, err := c.client.LMove(ctx, ProcessingQueueKey, DLQKey, "LEFT", "LEFT").Result()
+	return err
+}
+
+// MarkAsHydrated sets a marker in Redis indicating that the cache has been fully hydrated.
+func (c *RedisCache) MarkAsHydrated(ctx context.Context) error {
+	return c.client.Set(ctx, HydrationMarkerKey, "1", 0).Err()
+}
+
+// IsHydrated checks if the hydration marker exists in Redis.
+func (c *RedisCache) IsHydrated(ctx context.Context) (bool, error) {
+	count, err := c.client.Exists(ctx, HydrationMarkerKey).Result()
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 // HealthCheck verifies the connection to the Redis server.
