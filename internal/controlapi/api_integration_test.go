@@ -13,11 +13,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/rafaeljc/heimdall/internal/controlapi"
 	"github.com/rafaeljc/heimdall/internal/store"
 	"github.com/rafaeljc/heimdall/internal/testsupport"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // TestControlPlaneAPI_Integration validates the full HTTP request lifecycle.
@@ -38,17 +40,36 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 		}
 	}()
 
+	// Start Redis Container
+	redisContainer, err := testsupport.StartRedisContainer(ctx)
+	require.NoError(t, err, "failed to start redis container")
+	defer func() {
+		if err := redisContainer.Terminate(ctx); err != nil {
+			t.Logf("failed to terminate redis container: %v", err)
+		}
+	}()
+
+	// Setup Verification Client (Spy)
+	// Even though redisContainer.Client is available, it is the abstract cache.Service interface.
+	// To strictly verify the side-effects (queue content) without modifying the interface,
+	// we create a raw Redis client just for assertions.
+	endpoint, err := redisContainer.Container.PortEndpoint(ctx, "6379/tcp", "")
+	require.NoError(t, err, "failed to get redis endpoint for verification")
+
+	verifierClient := redis.NewClient(&redis.Options{Addr: endpoint})
+	defer verifierClient.Close()
+
 	// 2. Application Wiring
 	// Initialize real dependencies (Repository -> DB)
 	repo := store.NewPostgresStore(pgContainer.DB)
 	// Initialize API with dependency injection
-	api := controlapi.NewAPI(repo)
+	api := controlapi.NewAPI(repo, redisContainer.Client)
 
 	// -------------------------------------------------------------------------
 	// SCENARIO 1: POST /flags (Creation & Validation)
 	// -------------------------------------------------------------------------
 
-	t.Run("POST /flags - Happy Path (Full Payload)", func(t *testing.T) {
+	t.Run("POST /flags - Happy Path (Full Payload & Cache Event)", func(t *testing.T) {
 		// Arrange: Use a unique key to ensure isolation from other tests
 		key := fmt.Sprintf("feature-full-%d", time.Now().UnixNano())
 
@@ -90,6 +111,21 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 		assert.Equal(t, int64(1), resp.Version, "New flags must start at Version 1")
 		assert.JSONEq(t, "[]", string(resp.Rules), "Rules should be an empty JSON array []")
 
+		// Validate Side Effect (Redis Queue)
+		// We verify that the API actually pushed the key to the 'heimdall:queue:updates' list.
+		require.Eventually(t, func() bool {
+			// Check if list has items
+			length, err := verifierClient.LLen(ctx, "heimdall:queue:updates").Result()
+			if err != nil || length == 0 {
+				return false
+			}
+
+			// Check if the item is indeed our key
+			// Note: In a real concurent test we might just check LPos or LRange,
+			// but for this isolated test, LPop is fine.
+			val, err := verifierClient.LPop(ctx, "heimdall:queue:updates").Result()
+			return err == nil && val == key
+		}, 2*time.Second, 100*time.Millisecond, "Flag key must appear in Redis update queue")
 	})
 
 	t.Run("POST /flags - Happy Path (Defaults Check)", func(t *testing.T) {
@@ -124,38 +160,38 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 
 		tests := []struct {
 			name           string
-			payload        map[string]interface{}
+			payload        map[string]any
 			expectedStatus int
 			expectedCode   string
 		}{
 			// --- KEY VALIDATION ---
 			{
 				name:           "Key Missing",
-				payload:        map[string]interface{}{"name": "No Key"},
+				payload:        map[string]any{"name": "No Key"},
 				expectedStatus: http.StatusBadRequest,
 				expectedCode:   "ERR_INVALID_INPUT",
 			},
 			{
 				name:           "Key Too Short",
-				payload:        map[string]interface{}{"key": "ab", "name": "Short"},
+				payload:        map[string]any{"key": "ab", "name": "Short"},
 				expectedStatus: http.StatusBadRequest,
 				expectedCode:   "ERR_INVALID_INPUT",
 			},
 			{
 				name:           "Key Too Long",
-				payload:        map[string]interface{}{"key": longString, "name": "Long"},
+				payload:        map[string]any{"key": longString, "name": "Long"},
 				expectedStatus: http.StatusBadRequest,
 				expectedCode:   "ERR_INVALID_INPUT",
 			},
 			{
 				name:           "Key Invalid Chars",
-				payload:        map[string]interface{}{"key": "Invalid Key!", "name": "Bad Chars"},
+				payload:        map[string]any{"key": "Invalid Key!", "name": "Bad Chars"},
 				expectedStatus: http.StatusBadRequest,
 				expectedCode:   "ERR_INVALID_INPUT",
 			},
 			{
 				name:           "Key Wrong Type (Int)",
-				payload:        map[string]interface{}{"key": 12345, "name": "Type Error"},
+				payload:        map[string]any{"key": 12345, "name": "Type Error"},
 				expectedStatus: http.StatusBadRequest,
 				// Fails at JSON Unmarshal level
 				expectedCode: "ERR_INVALID_JSON",
@@ -164,19 +200,19 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 			// --- NAME VALIDATION ---
 			{
 				name:           "Name Missing",
-				payload:        map[string]interface{}{"key": "valid-key"},
+				payload:        map[string]any{"key": "valid-key"},
 				expectedStatus: http.StatusBadRequest,
 				expectedCode:   "ERR_INVALID_INPUT",
 			},
 			{
 				name:           "Name Too Long",
-				payload:        map[string]interface{}{"key": "valid-key", "name": longString},
+				payload:        map[string]any{"key": "valid-key", "name": longString},
 				expectedStatus: http.StatusBadRequest,
 				expectedCode:   "ERR_INVALID_INPUT",
 			},
 			{
 				name:           "Name Wrong Type (Bool)",
-				payload:        map[string]interface{}{"key": "valid-key", "name": true},
+				payload:        map[string]any{"key": "valid-key", "name": true},
 				expectedStatus: http.StatusBadRequest,
 				expectedCode:   "ERR_INVALID_JSON",
 			},
@@ -184,19 +220,19 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 			// --- TYPE SAFETY (Other Fields) ---
 			{
 				name:           "Description Wrong Type",
-				payload:        map[string]interface{}{"key": "valid-key", "name": "n1", "description": 123},
+				payload:        map[string]any{"key": "valid-key", "name": "n1", "description": 123},
 				expectedStatus: http.StatusBadRequest,
 				expectedCode:   "ERR_INVALID_JSON",
 			},
 			{
 				name:           "Enabled Wrong Type",
-				payload:        map[string]interface{}{"key": "valid-key", "name": "n2", "enabled": "false"},
+				payload:        map[string]any{"key": "valid-key", "name": "n2", "enabled": "false"},
 				expectedStatus: http.StatusBadRequest,
 				expectedCode:   "ERR_INVALID_JSON",
 			},
 			{
 				name:           "DefaultValue Wrong Type",
-				payload:        map[string]interface{}{"key": "valid-key", "name": "n3", "default_value": "true"},
+				payload:        map[string]any{"key": "valid-key", "name": "n3", "default_value": "true"},
 				expectedStatus: http.StatusBadRequest,
 				expectedCode:   "ERR_INVALID_JSON",
 			},

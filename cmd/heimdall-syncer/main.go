@@ -55,16 +55,6 @@ func run() error {
 		return fmt.Errorf("REDIS_URL environment variable is required")
 	}
 
-	// Default polling interval
-	syncInterval := 10 * time.Second
-	if val := os.Getenv("SYNC_INTERVAL"); val != "" {
-		if d, err := time.ParseDuration(val); err == nil {
-			syncInterval = d
-		} else {
-			log.Warn("invalid SYNC_INTERVAL, using default", slog.String("value", val))
-		}
-	}
-
 	// Create a background context that we can cancel on shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -97,9 +87,7 @@ func run() error {
 	// Layer 2: Service Logic
 	worker := syncer.New(
 		log,
-		syncer.Config{
-			Interval: syncInterval,
-		},
+		syncer.Config{}, // Use defaults
 		flagRepo,
 		redisCache,
 	)

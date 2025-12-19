@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rafaeljc/heimdall/internal/cache"
 	"github.com/rafaeljc/heimdall/internal/controlapi"
 	"github.com/rafaeljc/heimdall/internal/database"
 	"github.com/rafaeljc/heimdall/internal/logger"
@@ -63,11 +64,15 @@ func run() error {
 	)
 
 	// -------------------------------------------------------------------------
-	// 1. Database Connection Setup
+	// 1. Configuration
 	// -------------------------------------------------------------------------
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		return fmt.Errorf("DATABASE_URL environment variable is required")
+	}
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		return fmt.Errorf("REDIS_URL environment variable is required")
 	}
 
 	// Create a background context for the initialization phase
@@ -80,6 +85,13 @@ func run() error {
 	}
 	defer pgPool.Close()
 
+	// Initialize Redis Client
+	redisCache, err := cache.NewRedisCache(ctx, redisURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to redis: %w", err)
+	}
+	defer redisCache.Close()
+
 	// -------------------------------------------------------------------------
 	// 2. Dependency Injection & Wiring
 	// -------------------------------------------------------------------------
@@ -90,7 +102,7 @@ func run() error {
 
 	// Layer 2: API (Controller)
 	// Inject the repository into the API handler.
-	api := controlapi.NewAPI(flagStore)
+	api := controlapi.NewAPI(flagStore, redisCache)
 
 	// -------------------------------------------------------------------------
 	// 3. HTTP Server Setup

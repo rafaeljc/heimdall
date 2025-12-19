@@ -1,6 +1,7 @@
 package controlapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/render"
 	"github.com/rafaeljc/heimdall/internal/logger"
@@ -104,7 +106,10 @@ func (a *API) handleCreateFlag(w http.ResponseWriter, r *http.Request) {
 	// 5. Map Domain Model back to Response DTO
 	resp := mapStoreFlagToResponse(flag)
 
-	// 6. Return Success
+	// 6. Async Notification
+	a.notifyCacheAsync(log, flag.Key)
+
+	// 7. Return Success
 	log.Info("flag created successfully", slog.String("flag_key", flag.Key), slog.Int64("flag_id", flag.ID))
 	render.Status(r, http.StatusCreated)
 	render.JSON(w, r, resp)
@@ -242,4 +247,38 @@ func mapStoreFlagToResponse(f *store.Flag) Flag {
 		CreatedAt:    f.CreatedAt,
 		UpdatedAt:    f.UpdatedAt,
 	}
+}
+
+// notifyCacheAsync try to notify the cache asynchronously about a flag update.
+func (a *API) notifyCacheAsync(log *slog.Logger, flagKey string) {
+	go func(key string) {
+		// Create a context disconnected from the HTTP request.
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		const maxRetries = 3
+		baseDelay := 100 * time.Millisecond
+
+		for i := 0; i <= maxRetries; i++ {
+			err := a.cache.PublishUpdate(ctx, key)
+			if err == nil {
+				return
+			}
+
+			if i == maxRetries {
+				log.Error("CRITICAL: failed to push update event after retries",
+					slog.String("key", key),
+					slog.String("error", err.Error()))
+				return
+			}
+
+			// Simple exponential backoff
+			log.Warn("failed to push update, retrying...",
+				slog.String("key", key),
+				slog.Int("attempt", i+1),
+				slog.String("error", err.Error()))
+
+			time.Sleep(baseDelay * time.Duration(1<<i))
+		}
+	}(flagKey)
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -53,6 +54,9 @@ type FlagRepository interface {
 	// ListAllFlags retrieves all flags from the database.
 	// Used by the Syncer to populate the cache.
 	ListAllFlags(ctx context.Context) ([]*Flag, error)
+
+	// GetFlagByKey retrieves a flag by its unique key.
+	GetFlagByKey(ctx context.Context, key string) (*Flag, error)
 }
 
 // PostgresStore is the implementation of FlagRepository backed by PostgreSQL.
@@ -162,6 +166,11 @@ func (s *PostgresStore) ListFlags(ctx context.Context, limit, offset int) ([]*Fl
 		); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan flag row: %w", err)
 		}
+
+		if len(f.Rules) == 0 {
+			f.Rules = []ruleengine.Rule{}
+		}
+
 		flags = append(flags, &f)
 	}
 
@@ -205,6 +214,11 @@ func (s *PostgresStore) ListAllFlags(ctx context.Context) ([]*Flag, error) {
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan flag: %w", err)
 		}
+
+		if len(f.Rules) == 0 {
+			f.Rules = []ruleengine.Rule{}
+		}
+
 		flags = append(flags, &f)
 	}
 
@@ -213,4 +227,40 @@ func (s *PostgresStore) ListAllFlags(ctx context.Context) ([]*Flag, error) {
 	}
 
 	return flags, nil
+}
+
+// GetFlagByKey retrieves a single flag by its unique key.
+func (s *PostgresStore) GetFlagByKey(ctx context.Context, key string) (*Flag, error) {
+	query := `
+		SELECT id, key, name, description, enabled, default_value, rules, version, created_at, updated_at
+		FROM flags
+		WHERE key = $1
+	`
+
+	var f Flag
+	err := s.db.QueryRow(ctx, query, key).Scan(
+		&f.ID,
+		&f.Key,
+		&f.Name,
+		&f.Description,
+		&f.Enabled,
+		&f.DefaultValue,
+		&f.Rules,
+		&f.Version,
+		&f.CreatedAt,
+		&f.UpdatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("flag not found: %w", err)
+		}
+		return nil, fmt.Errorf("failed to get flag: %w", err)
+	}
+
+	if len(f.Rules) == 0 {
+		f.Rules = []ruleengine.Rule{}
+	}
+
+	return &f, nil
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/render"
 
+	"github.com/rafaeljc/heimdall/internal/cache"
 	"github.com/rafaeljc/heimdall/internal/store"
 )
 
@@ -20,19 +21,26 @@ type API struct {
 	// flags is the data access layer for feature flags.
 	// We use the interface type to allow for mocking in unit tests.
 	flags store.FlagRepository
+
+	// cache is used to publish flag update events to subscribers.
+	cache cache.Service
 }
 
 // NewAPI creates a new API instance and configures its routes.
-func NewAPI(flagRepo store.FlagRepository) *API {
+func NewAPI(flagRepo store.FlagRepository, cacheSvc cache.Service) *API {
 	// We check the interface explicitly.
 	// An interface is only nil if it has no underlying type and no value.
 	if flagRepo == nil {
 		panic("controlapi: flag repository cannot be nil")
 	}
+	if cacheSvc == nil {
+		panic("controlapi: cache service cannot be nil")
+	}
 
 	api := &API{
 		Router: chi.NewRouter(),
 		flags:  flagRepo,
+		cache:  cacheSvc,
 	}
 
 	api.configureRoutes()
