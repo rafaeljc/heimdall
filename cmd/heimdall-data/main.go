@@ -1,7 +1,8 @@
 // Package main initializes and runs the Heimdall Data Plane service.
 //
 // It acts as the composition root for the high-performance gRPC API,
-// wiring up the Redis cache and handling the server lifecycle.
+// wiring up the Redis cache (L2), In-Memory cache (L1), Rule Engine,
+// and handling the server lifecycle.
 package main
 
 import (
@@ -20,6 +21,7 @@ import (
 	"github.com/rafaeljc/heimdall/internal/cache"
 	"github.com/rafaeljc/heimdall/internal/dataapi"
 	"github.com/rafaeljc/heimdall/internal/logger"
+	"github.com/rafaeljc/heimdall/internal/ruleengine"
 )
 
 // main is the application entrypoint.
@@ -73,19 +75,27 @@ func run() error {
 	// 2. Infrastructure Setup
 	// -------------------------------------------------------------------------
 
+	// Rule Engine
+	engine := ruleengine.New(log)
+
 	// Initialize Redis Client (L2 Cache)
 	redisCache, err := cache.NewRedisCache(ctx, redisURL)
 	if err != nil {
 		return fmt.Errorf("failed to connect to redis: %w", err)
 	}
-	defer redisCache.Close()
+	// Deferred close happens in reverse order of creation in the shutdown block
+	// but we place it here conceptually. We will manage exact closing order below.
 
 	// -------------------------------------------------------------------------
 	// 3. Wiring (Dependency Injection)
 	// -------------------------------------------------------------------------
 
 	// Initialize the gRPC API implementation
-	api := dataapi.NewAPI(redisCache)
+	api, err := dataapi.NewAPI(log, redisCache, engine)
+	if err != nil {
+		redisCache.Close()
+		return fmt.Errorf("failed to initialize data api: %w", err)
+	}
 
 	// -------------------------------------------------------------------------
 	// 4. gRPC Server Setup
@@ -94,6 +104,8 @@ func run() error {
 	// Create the TCP listener first (Fail Fast)
 	listener, err := net.Listen("tcp", ":"+port)
 	if err != nil {
+		api.Close()
+		redisCache.Close()
 		return fmt.Errorf("failed to bind port %s: %w", port, err)
 	}
 
@@ -113,7 +125,10 @@ func run() error {
 	// Enable Server Reflection.
 	// This allows tools like 'grpcurl' or Postman to inspect the API
 	// dynamically without needing the .proto file locally.
-	reflection.Register(grpcServer)
+	if logger.Environment(appEnv) != logger.EnvProd {
+		reflection.Register(grpcServer)
+		log.Info("grpc reflection enabled")
+	}
 
 	log.Info("server listening", slog.String("address", listener.Addr().String()))
 
@@ -121,7 +136,7 @@ func run() error {
 	errChan := make(chan error, 1)
 	go func() {
 		if err := grpcServer.Serve(listener); err != nil {
-			errChan <- fmt.Errorf("failed to serve gRPC: %w", err)
+			errChan <- fmt.Errorf("failed to serve grpc: %w", err)
 		}
 	}()
 
@@ -150,11 +165,20 @@ func run() error {
 	t := time.NewTimer(5 * time.Second)
 	select {
 	case <-stopped:
-		log.Info("service exited successfully")
+		log.Info("grpc server stopped gracefully")
 	case <-t.C:
 		log.Warn("shutdown timed out, forcing stop")
 		grpcServer.Stop()
 	}
 
+	log.Info("releasing api resources")
+	api.Close()
+
+	log.Info("closing redis connection")
+	if err := redisCache.Close(); err != nil {
+		log.Error("error closing redis", slog.String("error", err.Error()))
+	}
+
+	log.Info("shutdown complete")
 	return nil
 }

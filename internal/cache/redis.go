@@ -8,17 +8,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/rafaeljc/heimdall/internal/ruleengine"
 )
 
 const (
-	KeyPrefix          = "heimdall:flag"
-	UpdateQueueKey     = "heimdall:queue:updates"
-	ProcessingQueueKey = "heimdall:queue:processing"
-	DLQKey             = "heimdall:queue:dlq"
-	HydrationMarkerKey = "heimdall:sys:hydrated"
+	KeyPrefix           = "heimdall:flag"
+	UpdateQueueKey      = "heimdall:queue:updates"
+	ProcessingQueueKey  = "heimdall:queue:processing"
+	DLQKey              = "heimdall:queue:dlq"
+	HydrationMarkerKey  = "heimdall:sys:hydrated"
+	InvalidationChannel = "heimdall:channel:invalidation"
 
 	// Lua script for Optimistic Locking.
 	// Returns:
@@ -73,14 +77,21 @@ type Service interface {
 	// SetFlagSafely sets the flag data with optimistic locking based on version.
 	SetFlagSafely(ctx context.Context, key string, value interface{}, version int64) (SetResult, error)
 
-	// GetFlag retrieves all fields for a specific flag hash.
-	GetFlag(ctx context.Context, key string) (map[string]string, error)
+	// GetFlag retrieves and deserializes a specific flag.
+	// Returns nil, nil if the key does not exist.
+	GetFlag(ctx context.Context, key string) (*ruleengine.FeatureFlag, error)
 
 	// Queue
 	PublishUpdate(ctx context.Context, flagKey string) error
 	WaitForUpdate(ctx context.Context, timeout time.Duration) (string, error)
 	AckUpdate(ctx context.Context, flagKey string) error
 	MoveToDLQ(ctx context.Context, flagKey string) error
+
+	// Pub/Sub (Real-time Invalidation)
+	// BroadcastUpdate notifies all Data Plane instances to invalidate their L1.
+	BroadcastUpdate(ctx context.Context, flagKey string) error
+	// SubscribeInvalidation returns a channel that receives keys to be invalidated.
+	SubscribeInvalidation(ctx context.Context) <-chan string
 
 	// Resilience
 	MarkAsHydrated(ctx context.Context) error
@@ -112,8 +123,8 @@ func NewRedisCache(ctx context.Context, addr string) (*RedisCache, error) {
 		ReadTimeout:  30 * time.Second, // Should be longer than BLMOVE timeout
 		WriteTimeout: 3 * time.Second,
 		// Connection Pool settings
-		PoolSize:     10,
-		MinIdleConns: 2,
+		PoolSize:     50, // High pool size for Data Plane throughput
+		MinIdleConns: 10,
 	}
 
 	client := redis.NewClient(opts)
@@ -150,19 +161,36 @@ func (c *RedisCache) SetFlagSafely(ctx context.Context, key string, value interf
 	return SetResult(res), nil
 }
 
-// GetFlag retrieves all fields from the Redis hash.
-// It returns map[string]string because Redis hashes are fundamentally strings.
-func (c *RedisCache) GetFlag(ctx context.Context, key string) (map[string]string, error) {
+// GetFlag retrieves and deserializes a specific flag from Redis.
+func (c *RedisCache) GetFlag(ctx context.Context, key string) (*ruleengine.FeatureFlag, error) {
 	redisKey := fmt.Sprintf("%s:%s", KeyPrefix, key)
 
-	// HGetAll returns all fields and values of the hash.
-	// If the key does not exist, it returns an empty map and no error.
-	result, err := c.client.HGetAll(ctx, redisKey).Result()
+	val, err := c.client.Get(ctx, redisKey).Result()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get flag %q from cache: %w", key, err)
+		if errors.Is(err, redis.Nil) {
+			return nil, nil // Not found is not an error
+		}
+		return nil, fmt.Errorf("failed to get flag from redis: %w", err)
 	}
 
-	return result, nil
+	// Parse Protocol: "version|json"
+	_, jsonPart, found := strings.Cut(val, "|")
+	if !found {
+		// Fallback for legacy/corrupted data that might be raw JSON
+		jsonPart = val
+	}
+
+	var flag ruleengine.FeatureFlag
+	if err := json.Unmarshal([]byte(jsonPart), &flag); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal flag json: %w", err)
+	}
+
+	// Compile rules: parse JSON Value into efficient CompiledValue structures
+	if err := ruleengine.CompileRules(flag.Rules); err != nil {
+		return nil, fmt.Errorf("failed to compile rules for flag %s: %w", key, err)
+	}
+
+	return &flag, nil
 }
 
 // PublishUpdate adds a flag key to the update queue.
@@ -192,6 +220,43 @@ func (c *RedisCache) AckUpdate(ctx context.Context, flagKey string) error {
 func (c *RedisCache) MoveToDLQ(ctx context.Context, flagKey string) error {
 	_, err := c.client.LMove(ctx, ProcessingQueueKey, DLQKey, "LEFT", "LEFT").Result()
 	return err
+}
+
+// BroadcastUpdate publishes an invalidation event to all Data Plane pods.
+func (c *RedisCache) BroadcastUpdate(ctx context.Context, flagKey string) error {
+	return c.client.Publish(ctx, InvalidationChannel, flagKey).Err()
+}
+
+// SubscribeInvalidation returns a channel that receives keys needing invalidation.
+// It manages the subscription lifecycle in a background goroutine.
+func (c *RedisCache) SubscribeInvalidation(ctx context.Context) <-chan string {
+	ch := make(chan string)
+	pubsub := c.client.Subscribe(ctx, InvalidationChannel)
+
+	go func() {
+		defer close(ch)
+		defer pubsub.Close()
+
+		// Wait for subscription to be confirmed
+		if _, err := pubsub.Receive(ctx); err != nil {
+			return
+		}
+
+		chMsg := pubsub.Channel()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg, ok := <-chMsg:
+				if !ok {
+					return
+				}
+				ch <- msg.Payload
+			}
+		}
+	}()
+
+	return ch
 }
 
 // MarkAsHydrated sets a marker in Redis indicating that the cache has been fully hydrated.

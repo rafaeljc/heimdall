@@ -7,19 +7,18 @@ package dataapi
 import (
 	"context"
 	"log/slog"
-	"strconv"
 
 	"github.com/rafaeljc/heimdall/internal/logger"
+	"github.com/rafaeljc/heimdall/internal/ruleengine"
 	pb "github.com/rafaeljc/heimdall/proto/heimdall/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-// Evaluate evaluates a feature flag against the provided user context.
+// Evaluate evaluates a feature flag against the provided user context using a
+// Read-Through caching strategy.
 //
-// It retrieves the flag configuration from the L2 Cache (Redis) and determines
-// the resulting boolean value. Currently, it supports static on/off toggles based
-// on the "enabled" field.
+// Flow: L1 (Memory) -> L2 (Redis) -> Engine -> Response
 //
 // It returns:
 //   - OK with the boolean value if successful.
@@ -39,35 +38,73 @@ func (a *API) Evaluate(ctx context.Context, req *pb.EvaluateRequest) (*pb.Evalua
 	// Trace the evaluation attempt (Debug level for high-throughput)
 	log.Debug("evaluating flag", slog.String("flag_key", req.FlagKey))
 
-	// 2. Retrieve from L2 Cache (Redis)
-	// In the future (V2), this step will be preceded by an L1 memory cache lookup.
-	rawMap, err := a.cache.GetFlag(ctx, req.FlagKey)
-	if err != nil {
-		// Log the internal error so SREs can debug connectivity issues.
-		// We use structured logging to capture the error details clearly.
-		log.Error("failed to fetch flag from cache",
-			slog.String("flag_key", req.FlagKey),
-			slog.String("error", err.Error()),
-		)
-		return nil, status.Errorf(codes.Internal, "failed to fetch flag configuration")
+	// 2. L1 Cache Check (In-Memory, Lock-Free)
+	flag, found := a.l1.Get(req.FlagKey)
+
+	if !found {
+		// 3. L2 Cache Check (Redis)
+		var err error
+		flag, err = a.l2.GetFlag(ctx, req.FlagKey)
+		if err != nil {
+			log.Error("failed to fetch flag from l2", slog.String("flag_key", req.FlagKey), slog.String("error", err.Error()))
+			// We return Internal here to be safe and avoid exposing internal errors to clients.
+			return nil, status.Error(codes.Internal, "failed to retrieve flag configuration")
+		}
+
+		if flag == nil {
+			return nil, status.Error(codes.NotFound, "flag not found")
+		}
+
+		// 4. Cache Fill (Read-Through)
+		a.l1.Set(req.FlagKey, flag)
 	}
 
-	// Redis HGETALL returns an empty map (not nil) if the key does not exist.
-	if len(rawMap) == 0 {
-		// Debug log is enough here; NotFound is a valid business state.
-		log.Debug("flag not found in cache", slog.String("flag_key", req.FlagKey))
-		return nil, status.Errorf(codes.NotFound, "flag %q not found", req.FlagKey)
+	// 5. Optimization: Short-Circuit
+	// If the flag is globally disabled, we can short-circuit the evaluation.
+	if !flag.Enabled {
+		return &pb.EvaluateResponse{
+			Value:  false,
+			Reason: "DISABLED",
+		}, nil
 	}
 
-	// 3. Evaluation Logic (V1 - Static Toggle)
-	// Redis stores booleans as strings. We use ParseBool to handle "1", "t", "true", etc.
-	// If parsing fails (or field is missing), it defaults to false (Safe Fallback).
-	enabledStr := rawMap["enabled"]
-	enabled, _ := strconv.ParseBool(enabledStr)
+	// 6. Context Preparation
+	attributes := make(map[string]string, len(req.Context))
+	var userID string
 
-	// 4. Construct Response
+	for k, v := range req.Context {
+		if k == "user_id" {
+			userID = v
+		}
+		attributes[k] = v // Strings are immutable, cheap to copy
+	}
+
+	input := ruleengine.EvaluationInput{
+		FlagKey: req.FlagKey,
+		User: ruleengine.Context{
+			UserID:     userID,
+			Attributes: attributes,
+		},
+	}
+
+	// 7. Rule Evaluation
+	match := a.engine.Evaluate(flag.Rules, input)
+
+	// 8. Determine final value and reason
+	var value bool
+	var reason string
+
+	if match {
+		value = true
+		reason = "RULE_MATCH"
+	} else {
+		// No rules matched - use the default value
+		value = flag.DefaultValue
+		reason = "NO_MATCH"
+	}
+
 	return &pb.EvaluateResponse{
-		Value:  enabled,
-		Reason: "STATIC_V1", // Debug info indicating no complex rules were evaluated
+		Value:  value,
+		Reason: reason,
 	}, nil
 }
