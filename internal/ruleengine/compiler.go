@@ -5,6 +5,15 @@ import (
 	"fmt"
 )
 
+const (
+	// MaxUserIDListSize limits the number of user IDs in a single USER_ID_LIST rule.
+	// Large user lists (>10K) indicate a design anti-pattern and would violate P99 < 20ms SLO:
+	// - 10K IDs: ~3-5ms compilation time (within budget)
+	// - 100K IDs: ~17-62ms compilation time (exceeds SLO by 2.5-3x)
+	// For large user groups, use user attributes, segments, or percentage rollouts instead.
+	MaxUserIDListSize = 10_000
+)
+
 // CompileRules processes the rules and compiles their Value (JSON) into CompiledValue (efficient data structures).
 // This must be called after deserializing rules from storage (DB/Redis) before evaluation.
 func CompileRules(rules []Rule) error {
@@ -40,7 +49,18 @@ func compileUserIDListRule(rule *Rule) error {
 		return fmt.Errorf("invalid USER_ID_LIST rule data: %w", err)
 	}
 
-	// Convert the slice into an efficient set (map with empty struct values)
+	// Early validation for empty lists (avoid unnecessary allocation)
+	if len(data.UserIDs) == 0 {
+		rule.CompiledValue = make(map[string]struct{})
+		return nil
+	}
+
+	// Enforce size limit to maintain P99 < 20ms SLO
+	if len(data.UserIDs) > MaxUserIDListSize {
+		return fmt.Errorf("USER_ID_LIST rule exceeds maximum size: %d > %d (use user segments or attributes instead)", len(data.UserIDs), MaxUserIDListSize)
+	}
+
+	// Pre-allocate map capacity
 	compiled := make(map[string]struct{}, len(data.UserIDs))
 	for _, id := range data.UserIDs {
 		compiled[id] = struct{}{}
