@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -41,6 +42,23 @@ type Flag struct {
 	UpdatedAt time.Time `db:"updated_at"`
 }
 
+// UpdateFlagParams defines the parameters for partial flag updates (PATCH semantics).
+// Only non-nil fields will be updated in the database.
+type UpdateFlagParams struct {
+	// Key identifies which flag to update (required).
+	Key string
+
+	// Version is required for optimistic locking.
+	Version int64
+
+	// Fields to update (nil = no change).
+	Name         *string
+	Description  *string
+	Enabled      *bool
+	DefaultValue *bool
+	Rules        *[]ruleengine.Rule
+}
+
 // FlagRepository defines the interface for flag persistence operations.
 // Using an interface allows for dependency injection and easier mocking in tests.
 type FlagRepository interface {
@@ -57,6 +75,14 @@ type FlagRepository interface {
 
 	// GetFlagByKey retrieves a flag by its unique key.
 	GetFlagByKey(ctx context.Context, key string) (*Flag, error)
+
+	// UpdateFlag performs a partial update with optimistic locking.
+	// Returns the updated flag or an error if version mismatch or flag not found.
+	UpdateFlag(ctx context.Context, params *UpdateFlagParams) (*Flag, error)
+
+	// DeleteFlag permanently removes a flag from the database by its key.
+	// Returns an error if the flag doesn't exist.
+	DeleteFlag(ctx context.Context, key string) error
 }
 
 // PostgresStore is the implementation of FlagRepository backed by PostgreSQL.
@@ -263,4 +289,109 @@ func (s *PostgresStore) GetFlagByKey(ctx context.Context, key string) (*Flag, er
 	}
 
 	return &f, nil
+}
+
+// UpdateFlag performs a partial update on a flag with optimistic locking.
+// Only the fields provided in params (non-nil pointers) will be updated.
+// The version field is used to prevent lost updates in concurrent scenarios.
+func (s *PostgresStore) UpdateFlag(ctx context.Context, params *UpdateFlagParams) (*Flag, error) {
+	// Build dynamic SQL query based on provided fields
+	setClauses := []string{}
+	args := []interface{}{}
+	argCounter := 1
+
+	if params.Name != nil {
+		setClauses = append(setClauses, fmt.Sprintf("name = $%d", argCounter))
+		args = append(args, *params.Name)
+		argCounter++
+	}
+
+	if params.Description != nil {
+		setClauses = append(setClauses, fmt.Sprintf("description = $%d", argCounter))
+		args = append(args, *params.Description)
+		argCounter++
+	}
+
+	if params.Enabled != nil {
+		setClauses = append(setClauses, fmt.Sprintf("enabled = $%d", argCounter))
+		args = append(args, *params.Enabled)
+		argCounter++
+	}
+
+	if params.DefaultValue != nil {
+		setClauses = append(setClauses, fmt.Sprintf("default_value = $%d", argCounter))
+		args = append(args, *params.DefaultValue)
+		argCounter++
+	}
+
+	if params.Rules != nil {
+		rules := *params.Rules
+		if rules == nil {
+			rules = []ruleengine.Rule{}
+		}
+		setClauses = append(setClauses, fmt.Sprintf("rules = $%d", argCounter))
+		args = append(args, rules)
+		argCounter++
+	}
+
+	// Always increment version and update timestamp
+	setClauses = append(setClauses, "version = version + 1")
+	setClauses = append(setClauses, "updated_at = NOW()")
+
+	// Build the final query
+	query := fmt.Sprintf(`
+		UPDATE flags
+		SET %s
+		WHERE key = $%d AND version = $%d
+		RETURNING id, key, name, description, enabled, default_value, rules, version, created_at, updated_at
+	`, strings.Join(setClauses, ", "), argCounter, argCounter+1)
+
+	// Add WHERE clause parameters
+	args = append(args, params.Key, params.Version)
+
+	// Execute the update
+	var f Flag
+	err := s.db.QueryRow(ctx, query, args...).Scan(
+		&f.ID,
+		&f.Key,
+		&f.Name,
+		&f.Description,
+		&f.Enabled,
+		&f.DefaultValue,
+		&f.Rules,
+		&f.Version,
+		&f.CreatedAt,
+		&f.UpdatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("version conflict or flag not found")
+		}
+		return nil, fmt.Errorf("failed to update flag: %w", err)
+	}
+
+	if len(f.Rules) == 0 {
+		f.Rules = []ruleengine.Rule{}
+	}
+
+	return &f, nil
+}
+
+// DeleteFlag permanently removes a flag from the database.
+// It returns an error if the flag doesn't exist.
+func (s *PostgresStore) DeleteFlag(ctx context.Context, key string) error {
+	query := `DELETE FROM flags WHERE key = $1`
+
+	result, err := s.db.Exec(ctx, query, key)
+	if err != nil {
+		return fmt.Errorf("failed to delete flag: %w", err)
+	}
+
+	// Check if any rows were affected
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("flag not found")
+	}
+
+	return nil
 }
