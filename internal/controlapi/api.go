@@ -89,11 +89,6 @@ func (a *API) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
 
 // --- Handler Stubs (To be implemented) ---
 
-func (a *API) handleGetFlag(w http.ResponseWriter, r *http.Request) {
-	render.Status(r, http.StatusNotImplemented)
-	render.JSON(w, r, ErrorResponse{Code: "NOT_IMPLEMENTED", Message: "Endpoint coming soon"})
-}
-
 func (a *API) handleUpdateFlag(w http.ResponseWriter, r *http.Request) {
 	render.Status(r, http.StatusNotImplemented)
 	render.JSON(w, r, ErrorResponse{Code: "NOT_IMPLEMENTED", Message: "Endpoint coming soon"})

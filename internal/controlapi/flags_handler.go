@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/render"
 	"github.com/rafaeljc/heimdall/internal/logger"
 	"github.com/rafaeljc/heimdall/internal/ruleengine"
@@ -199,6 +200,57 @@ func (a *API) handleListFlags(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
+	render.Status(r, http.StatusOK)
+	render.JSON(w, r, resp)
+}
+
+// handleGetFlag processes the GET /api/v1/flags/{key} request.
+//
+// Responsibilities:
+// 1. Extracts the {key} path parameter.
+// 2. Calls the Repository to fetch the flag by key.
+// 3. Handles not found errors (404).
+// 4. Maps the domain model to the response DTO.
+// 5. Returns the flag with a 200 OK status.
+//
+// Note: We do NOT validate the key format here. According to the OpenAPI spec,
+// GET /flags/{key} only returns 200 or 404. If the key format is invalid, the
+// database query will simply not find it, resulting in a 404 (which is correct).
+func (a *API) handleGetFlag(w http.ResponseWriter, r *http.Request) {
+	log := logger.FromContext(r.Context())
+
+	// 1. Extract Path Parameter
+	// Chi automatically handles URL decoding for us.
+	key := chi.URLParam(r, "key")
+
+	// 2. Call Repository
+	flag, err := a.flags.GetFlagByKey(r.Context(), key)
+	if err != nil {
+		// Check if it's a "not found" error
+		// The store returns an error containing "not found" in the message.
+		if strings.Contains(err.Error(), "not found") {
+			render.Status(r, http.StatusNotFound)
+			render.JSON(w, r, ErrorResponse{
+				Code:    "ERR_NOT_FOUND",
+				Message: fmt.Sprintf("Flag with key '%s' not found", key),
+			})
+			return
+		}
+
+		// System Error: Internal Server Error
+		log.Error("failed to get flag from db", slog.String("key", key), slog.String("error", err.Error()))
+		render.Status(r, http.StatusInternalServerError)
+		render.JSON(w, r, ErrorResponse{
+			Code:    "ERR_INTERNAL",
+			Message: "Failed to retrieve flag",
+		})
+		return
+	}
+
+	// 4. Map to Response DTO
+	resp := mapStoreFlagToResponse(flag)
+
+	// 5. Return Success
 	render.Status(r, http.StatusOK)
 	render.JSON(w, r, resp)
 }

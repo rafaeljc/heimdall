@@ -410,4 +410,101 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 			})
 		}
 	})
+
+	// -------------------------------------------------------------------------
+	// SCENARIO 3: GET /flags/{key} (Single Flag Retrieval)
+	// -------------------------------------------------------------------------
+
+	t.Run("GET /flags/{key} - Happy Path", func(t *testing.T) {
+		// Arrange: Create a flag with full data including rules
+		key := fmt.Sprintf("get-happy-%d", time.Now().UnixNano())
+
+		createReq := controlapi.CreateFlagRequest{
+			Key:          key,
+			Name:         "Get Happy Flag",
+			Description:  "Test flag for GET endpoint",
+			Enabled:      true,
+			DefaultValue: true,
+		}
+
+		createBody, _ := json.Marshal(createReq)
+		createHTTPReq := httptest.NewRequest(http.MethodPost, "/api/v1/flags", bytes.NewReader(createBody))
+		createHTTPReq.Header.Set("Content-Type", "application/json")
+		createRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(createRR, createHTTPReq)
+		require.Equal(t, http.StatusCreated, createRR.Code)
+
+		// Act: Retrieve the flag
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/flags/"+key, nil)
+		rr := httptest.NewRecorder()
+		api.Router.ServeHTTP(rr, req)
+
+		// Assert: HTTP Status
+		require.Equal(t, http.StatusOK, rr.Code)
+
+		// Assert: Response Structure
+		var resp controlapi.Flag
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+
+		// Assert: Data Integrity
+		assert.Equal(t, key, resp.Key)
+		assert.Equal(t, "Get Happy Flag", resp.Name)
+		assert.Equal(t, "Test flag for GET endpoint", resp.Description)
+		assert.True(t, resp.Enabled)
+		assert.True(t, resp.DefaultValue)
+		assert.Equal(t, int64(1), resp.Version)
+		assert.NotZero(t, resp.ID)
+		assert.False(t, resp.CreatedAt.IsZero())
+		assert.False(t, resp.UpdatedAt.IsZero())
+
+		// Assert: Rules are empty array by default
+		assert.NotNil(t, resp.Rules)
+		assert.JSONEq(t, "[]", string(resp.Rules))
+	})
+
+	t.Run("GET /flags/{key} - Not Found", func(t *testing.T) {
+		// According to OpenAPI spec, GET /flags/{key} returns 404 for any non-existent key,
+		// regardless of whether the key format is valid or invalid.
+		// The spec only defines 200 (success) and 404 (not found) status codes.
+
+		// Arrange: Create a flag to ensure at least one valid key exists
+		existingKey := fmt.Sprintf("existing-%d", time.Now().UnixNano())
+		createReq := controlapi.CreateFlagRequest{
+			Key:  existingKey,
+			Name: "Existing Flag",
+		}
+		createBody, _ := json.Marshal(createReq)
+		createHTTPReq := httptest.NewRequest(http.MethodPost, "/api/v1/flags", bytes.NewReader(createBody))
+		createHTTPReq.Header.Set("Content-Type", "application/json")
+		createRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(createRR, createHTTPReq)
+		require.Equal(t, http.StatusCreated, createRR.Code)
+
+		tests := []struct {
+			name string
+			key  string
+		}{
+			{"Valid Format But Nonexistent", fmt.Sprintf("non-existent-%d", time.Now().UnixNano())},
+			{"Invalid Format - Too Short", "ab"},
+			{"Invalid Format - Uppercase", strings.ToUpper(existingKey)},
+			{"Invalid Format - Special Chars", "invalid@key!"},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				// Act
+				req := httptest.NewRequest(http.MethodGet, "/api/v1/flags/"+tt.key, nil)
+				rr := httptest.NewRecorder()
+				api.Router.ServeHTTP(rr, req)
+
+				// Assert: All non-existent keys return 404, not 400
+				assert.Equal(t, http.StatusNotFound, rr.Code)
+
+				var errResp controlapi.ErrorResponse
+				require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &errResp))
+				assert.Equal(t, "ERR_NOT_FOUND", errResp.Code)
+				assert.Contains(t, errResp.Message, tt.key)
+			})
+		}
+	})
 }
