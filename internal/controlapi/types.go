@@ -151,10 +151,32 @@ func (r *CreateFlagRequest) Validate() *ErrorResponse {
 // Pointers are used to distinguish between "missing field" (do nothing)
 // and "false value" (explicit update to false).
 type UpdateFlagRequest struct {
-	Name         *string `json:"name,omitempty"`
-	Description  *string `json:"description,omitempty"`
-	Enabled      *bool   `json:"enabled,omitempty"`
-	DefaultValue *bool   `json:"default_value,omitempty"`
+	Name         *string          `json:"name,omitempty"`
+	Description  *string          `json:"description,omitempty"`
+	Enabled      *bool            `json:"enabled,omitempty"`
+	DefaultValue *bool            `json:"default_value,omitempty"`
+	Rules        *json.RawMessage `json:"rules,omitempty"`
+}
+
+// Validate checks if the provided fields adhere to business rules.
+func (r *UpdateFlagRequest) Validate() *ErrorResponse {
+	if r.Name != nil {
+		if err := validateFlagName(*r.Name); err != nil {
+			return err
+		}
+	}
+
+	if r.Rules != nil && len(*r.Rules) > 0 {
+		var rules map[string]interface{}
+		if err := json.Unmarshal(*r.Rules, &rules); err != nil {
+			return &ErrorResponse{
+				Code:    "ERR_INVALID_INPUT",
+				Message: "Rules must be a valid JSON array or object",
+			}
+		}
+	}
+
+	return nil
 }
 
 // PaginatedResponse is a standard wrapper for list endpoints to support offset pagination.

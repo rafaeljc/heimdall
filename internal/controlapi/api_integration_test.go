@@ -607,4 +607,205 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 			return err == nil && val == key
 		}, 2*time.Second, 100*time.Millisecond, "Flag key must appear in Redis update queue")
 	})
+
+	// -------------------------------------------------------------------------
+	// SCENARIO 5: PATCH /flags/{key} (Flag Update)
+	// -------------------------------------------------------------------------
+
+	t.Run("PATCH /flags/{key} - Happy Path (Partial Update)", func(t *testing.T) {
+		// Arrange: Create a flag to update
+		key := fmt.Sprintf("update-happy-%d", time.Now().UnixNano())
+
+		createReq := controlapi.CreateFlagRequest{
+			Key:          key,
+			Name:         "Original Name",
+			Description:  "Original Description",
+			Enabled:      false,
+			DefaultValue: false,
+		}
+
+		createBody, _ := json.Marshal(createReq)
+		createHTTPReq := httptest.NewRequest(http.MethodPost, "/api/v1/flags", bytes.NewReader(createBody))
+		createHTTPReq.Header.Set("Content-Type", "application/json")
+		createRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(createRR, createHTTPReq)
+		require.Equal(t, http.StatusCreated, createRR.Code)
+
+		var createdFlag controlapi.Flag
+		json.Unmarshal(createRR.Body.Bytes(), &createdFlag)
+		assert.Equal(t, int64(1), createdFlag.Version)
+
+		// Act: Update only name and enabled fields
+		newName := "Updated Name"
+		newEnabled := true
+		updateReq := map[string]interface{}{
+			"name":    newName,
+			"enabled": newEnabled,
+		}
+
+		updateBody, _ := json.Marshal(updateReq)
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/flags/"+key, bytes.NewReader(updateBody))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		api.Router.ServeHTTP(rr, req)
+
+		// Assert: HTTP Status
+		require.Equal(t, http.StatusOK, rr.Code)
+
+		// Assert: Response Structure
+		var resp controlapi.Flag
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+
+		// Assert: Updated fields changed
+		assert.Equal(t, newName, resp.Name)
+		assert.True(t, resp.Enabled)
+
+		// Assert: Non-updated fields preserved
+		assert.Equal(t, "Original Description", resp.Description)
+		assert.False(t, resp.DefaultValue)
+
+		// Assert: Version incremented
+		assert.Equal(t, int64(2), resp.Version)
+
+		// Assert: Timestamps
+		assert.False(t, resp.UpdatedAt.IsZero())
+		assert.True(t, resp.UpdatedAt.After(createdFlag.UpdatedAt))
+	})
+
+	t.Run("PATCH /flags/{key} - Not Found", func(t *testing.T) {
+		// Arrange: Generate a key that doesn't exist
+		nonExistentKey := fmt.Sprintf("non-existent-%d", time.Now().UnixNano())
+
+		updateReq := map[string]interface{}{
+			"name": "New Name",
+		}
+
+		// Act
+		updateBody, _ := json.Marshal(updateReq)
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/flags/"+nonExistentKey, bytes.NewReader(updateBody))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		api.Router.ServeHTTP(rr, req)
+
+		// Assert: HTTP Status
+		require.Equal(t, http.StatusNotFound, rr.Code)
+
+		// Assert: Error Response Structure
+		var errResp controlapi.ErrorResponse
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &errResp))
+		assert.Equal(t, "ERR_NOT_FOUND", errResp.Code)
+		assert.Contains(t, errResp.Message, nonExistentKey)
+	})
+
+	t.Run("PATCH /flags/{key} - Validation Errors", func(t *testing.T) {
+		// Arrange: Create a flag to update
+		key := fmt.Sprintf("update-validation-%d", time.Now().UnixNano())
+
+		createReq := controlapi.CreateFlagRequest{
+			Key:  key,
+			Name: "Test Flag",
+		}
+
+		createBody, _ := json.Marshal(createReq)
+		createHTTPReq := httptest.NewRequest(http.MethodPost, "/api/v1/flags", bytes.NewReader(createBody))
+		createHTTPReq.Header.Set("Content-Type", "application/json")
+		createRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(createRR, createHTTPReq)
+		require.Equal(t, http.StatusCreated, createRR.Code)
+
+		tests := []struct {
+			name           string
+			payload        map[string]interface{}
+			expectedStatus int
+			expectedCode   string
+		}{
+			{
+				name:           "Empty name",
+				payload:        map[string]interface{}{"name": ""},
+				expectedStatus: http.StatusBadRequest,
+				expectedCode:   "ERR_INVALID_INPUT",
+			},
+			{
+				name:           "Name too long",
+				payload:        map[string]interface{}{"name": strings.Repeat("a", 256)},
+				expectedStatus: http.StatusBadRequest,
+				expectedCode:   "ERR_INVALID_INPUT",
+			},
+			{
+				name:           "Invalid type for name",
+				payload:        map[string]interface{}{"name": 123},
+				expectedStatus: http.StatusBadRequest,
+				expectedCode:   "ERR_INVALID_JSON",
+			},
+			{
+				name:           "Invalid type for enabled",
+				payload:        map[string]interface{}{"enabled": "true"},
+				expectedStatus: http.StatusBadRequest,
+				expectedCode:   "ERR_INVALID_JSON",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				body, _ := json.Marshal(tt.payload)
+				req := httptest.NewRequest(http.MethodPatch, "/api/v1/flags/"+key, bytes.NewReader(body))
+				req.Header.Set("Content-Type", "application/json")
+				rr := httptest.NewRecorder()
+				api.Router.ServeHTTP(rr, req)
+
+				assert.Equal(t, tt.expectedStatus, rr.Code)
+
+				var errResp controlapi.ErrorResponse
+				json.Unmarshal(rr.Body.Bytes(), &errResp)
+				assert.Equal(t, tt.expectedCode, errResp.Code)
+			})
+		}
+	})
+
+	t.Run("PATCH /flags/{key} - Cache Event Published", func(t *testing.T) {
+		// Arrange: Create a flag to update
+		key := fmt.Sprintf("update-cache-%d", time.Now().UnixNano())
+
+		createReq := controlapi.CreateFlagRequest{
+			Key:     key,
+			Name:    "Cache Test",
+			Enabled: false,
+		}
+
+		createBody, _ := json.Marshal(createReq)
+		createHTTPReq := httptest.NewRequest(http.MethodPost, "/api/v1/flags", bytes.NewReader(createBody))
+		createHTTPReq.Header.Set("Content-Type", "application/json")
+		createRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(createRR, createHTTPReq)
+		require.Equal(t, http.StatusCreated, createRR.Code)
+
+		// Clear the queue to isolate the update event
+		verifierClient.Del(ctx, "heimdall:queue:updates")
+
+		// Act: Update the flag
+		newEnabled := true
+		updateReq := map[string]interface{}{
+			"enabled": newEnabled,
+		}
+
+		updateBody, _ := json.Marshal(updateReq)
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/flags/"+key, bytes.NewReader(updateBody))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		api.Router.ServeHTTP(rr, req)
+		require.Equal(t, http.StatusOK, rr.Code)
+
+		// Assert: Side Effect - Cache event was published to Redis queue
+		require.Eventually(t, func() bool {
+			// Check if list has items
+			length, err := verifierClient.LLen(ctx, "heimdall:queue:updates").Result()
+			if err != nil || length == 0 {
+				return false
+			}
+
+			// Check if the item is indeed our key
+			val, err := verifierClient.LPop(ctx, "heimdall:queue:updates").Result()
+			return err == nil && val == key
+		}, 2*time.Second, 100*time.Millisecond, "Flag key must appear in Redis update queue")
+	})
 }

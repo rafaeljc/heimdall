@@ -300,6 +300,116 @@ func (a *API) handleDeleteFlag(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleUpdateFlag processes the PATCH /api/v1/flags/{key} request.
+//
+// Responsibilities:
+// 1. Extracts the {key} path parameter.
+// 2. Decodes and validates the JSON payload.
+// 3. Retrieves the current flag to get its version.
+// 4. Calls the Repository to update the flag with optimistic locking.
+// 5. Handles version conflicts (409) and not found errors (404).
+// 6. Notifies cache asynchronously to invalidate the flag.
+// 7. Returns the updated flag with a 200 OK status.
+func (a *API) handleUpdateFlag(w http.ResponseWriter, r *http.Request) {
+	log := logger.FromContext(r.Context())
+
+	// 1. Extract Path Parameter
+	key := chi.URLParam(r, "key")
+
+	// 2. Decode Request
+	var req UpdateFlagRequest
+	if err := render.DecodeJSON(r.Body, &req); err != nil {
+		log.Warn("invalid json payload", slog.String("error", err.Error()))
+		render.Status(r, http.StatusBadRequest)
+		render.JSON(w, r, ErrorResponse{
+			Code:    "ERR_INVALID_JSON",
+			Message: "Invalid JSON payload: " + err.Error(),
+		})
+		return
+	}
+
+	// 3. Validate
+	if errResp := req.Validate(); errResp != nil {
+		render.Status(r, http.StatusBadRequest)
+		render.JSON(w, r, errResp)
+		return
+	}
+
+	// 4. Get current flag to retrieve version
+	currentFlag, err := a.flags.GetFlagByKey(r.Context(), key)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			render.Status(r, http.StatusNotFound)
+			render.JSON(w, r, ErrorResponse{
+				Code:    "ERR_NOT_FOUND",
+				Message: fmt.Sprintf("Flag with key '%s' not found", key),
+			})
+			return
+		}
+		log.Error("failed to get flag from db", slog.String("key", key), slog.String("error", err.Error()))
+		render.Status(r, http.StatusInternalServerError)
+		render.JSON(w, r, ErrorResponse{
+			Code:    "ERR_INTERNAL",
+			Message: "Failed to retrieve flag",
+		})
+		return
+	}
+
+	// 5. Build update parameters
+	params := &store.UpdateFlagParams{
+		Key:          key,
+		Version:      currentFlag.Version,
+		Name:         req.Name,
+		Description:  req.Description,
+		Enabled:      req.Enabled,
+		DefaultValue: req.DefaultValue,
+	}
+
+	// Map Rules if provided
+	if req.Rules != nil {
+		var rules []ruleengine.Rule
+		if len(*req.Rules) > 0 {
+			// Validation already confirmed this is valid JSON
+			_ = json.Unmarshal(*req.Rules, &rules)
+		}
+		params.Rules = &rules
+	}
+
+	// 6. Call Repository
+	updatedFlag, err := a.flags.UpdateFlag(r.Context(), params)
+	if err != nil {
+		// Check for version conflict or not found
+		if strings.Contains(err.Error(), "version conflict") || strings.Contains(err.Error(), "not found") {
+			render.Status(r, http.StatusConflict)
+			render.JSON(w, r, ErrorResponse{
+				Code:    "ERR_VERSION_CONFLICT",
+				Message: "The flag was modified by another request. Please retry with the latest version.",
+			})
+			return
+		}
+
+		// System Error
+		log.Error("failed to update flag in db", slog.String("key", key), slog.String("error", err.Error()))
+		render.Status(r, http.StatusInternalServerError)
+		render.JSON(w, r, ErrorResponse{
+			Code:    "ERR_INTERNAL",
+			Message: "Failed to update flag",
+		})
+		return
+	}
+
+	// 7. Map to Response DTO
+	resp := mapStoreFlagToResponse(updatedFlag)
+
+	// 8. Async Notification
+	a.notifyCacheAsync(log, key)
+
+	// 9. Return Success
+	log.Info("flag updated successfully", slog.String("flag_key", key), slog.Int64("new_version", updatedFlag.Version))
+	render.Status(r, http.StatusOK)
+	render.JSON(w, r, resp)
+}
+
 // --- Private Helpers ---
 
 // parseOptionalInt extracts an integer from the query string.
