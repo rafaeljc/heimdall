@@ -82,6 +82,72 @@ tasks:
     generates:
       - '{{.PROTO_DIR}}/**/*.pb.go'
 
+  # --- SECURITY (sec:*) ---
+  sec:genkey:
+    desc: Generates a secure random API key (32 bytes, base64-encoded)
+    silent: true
+    cmds:
+      - |
+        set +o history 2>/dev/null || true  # Disable history logging
+        set +x  # Disable command echoing
+        KEY=$(openssl rand -base64 32)
+        HASH=$(printf '%s' "$KEY" | sha256sum | cut -d' ' -f1)
+        
+        printf "\n"
+        printf "===================================================================\n"
+        printf "           HEIMDALL API KEY - STORE SECURELY\n"
+        printf "===================================================================\n"
+        printf "\n"
+        printf "API Key (use in Authorization header):\n"
+        printf "%s\n" "$KEY"
+        printf "\n"
+        printf "-------------------------------------------------------------------\n"
+        printf "\n"
+        printf "SHA-256 Hash (set as API_KEY_HASH env var):\n"
+        printf "%s\n" "$HASH"
+        printf "\n"
+        printf "===================================================================\n"
+        printf "SECURITY NOTICE:\n"
+        printf "  - Store the API Key in a secure location (password manager)\n"
+        printf "  - Set API_KEY_HASH in your environment/secrets manager\n"
+        printf "  - Never commit the key or hash to version control\n"
+        printf "  - This information will not be displayed again\n"
+        printf "===================================================================\n"
+        printf "\n"
+        
+        # Clear sensitive variables from memory
+        unset KEY HASH
+        set -o history 2>/dev/null || true  # Re-enable history
+
+  sec:hash:
+    desc: Computes SHA-256 hash for an existing API key
+    silent: true
+    cmds:
+      - |
+        set +o history 2>/dev/null || true  # Disable history logging
+        set +x  # Disable command echoing
+        
+        # Prompt for API key without echoing to terminal
+        printf "Enter API Key: " >&2
+        read -rs KEY
+        printf "\n" >&2
+        
+        if [ -z "$KEY" ]; then
+          printf "Error: API key cannot be empty\n" >&2
+          exit 1
+        fi
+        
+        HASH=$(printf '%s' "$KEY" | sha256sum | cut -d' ' -f1)
+        
+        printf "\n"
+        printf "SHA-256 Hash (set as API_KEY_HASH env var):\n"
+        printf "%s\n" "$HASH"
+        printf "\n"
+        
+        # Clear sensitive variables from memory
+        unset KEY HASH
+        set -o history 2>/dev/null || true  # Re-enable history
+
   # --- DEPENDENCY MANAGEMENT (tidy:*) ---
   tidy:deps:
     desc: Runs go mod tidy forcing Go 1.23 compatibility
