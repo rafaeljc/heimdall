@@ -507,4 +507,104 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 			})
 		}
 	})
+
+	// -------------------------------------------------------------------------
+	// SCENARIO 4: DELETE /flags/{key} (Flag Deletion)
+	// -------------------------------------------------------------------------
+
+	t.Run("DELETE /flags/{key} - Happy Path", func(t *testing.T) {
+		// Arrange: Create a flag to delete
+		key := fmt.Sprintf("delete-happy-%d", time.Now().UnixNano())
+
+		createReq := controlapi.CreateFlagRequest{
+			Key:          key,
+			Name:         "Flag to Delete",
+			Description:  "Test deletion",
+			Enabled:      true,
+			DefaultValue: false,
+		}
+
+		createBody, _ := json.Marshal(createReq)
+		createHTTPReq := httptest.NewRequest(http.MethodPost, "/api/v1/flags", bytes.NewReader(createBody))
+		createHTTPReq.Header.Set("Content-Type", "application/json")
+		createRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(createRR, createHTTPReq)
+		require.Equal(t, http.StatusCreated, createRR.Code)
+
+		// Act: Delete the flag
+		req := httptest.NewRequest(http.MethodDelete, "/api/v1/flags/"+key, nil)
+		rr := httptest.NewRecorder()
+		api.Router.ServeHTTP(rr, req)
+
+		// Assert: HTTP Status
+		require.Equal(t, http.StatusNoContent, rr.Code)
+		assert.Empty(t, rr.Body.String(), "204 No Content must have empty body")
+
+		// Assert: Side Effect - Flag no longer exists in database
+		getReq := httptest.NewRequest(http.MethodGet, "/api/v1/flags/"+key, nil)
+		getRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(getRR, getReq)
+		assert.Equal(t, http.StatusNotFound, getRR.Code, "Deleted flag should return 404")
+	})
+
+	t.Run("DELETE /flags/{key} - Not Found", func(t *testing.T) {
+		// Arrange: Generate a key that doesn't exist
+		nonExistentKey := fmt.Sprintf("non-existent-%d", time.Now().UnixNano())
+
+		// Act
+		req := httptest.NewRequest(http.MethodDelete, "/api/v1/flags/"+nonExistentKey, nil)
+		rr := httptest.NewRecorder()
+		api.Router.ServeHTTP(rr, req)
+
+		// Assert: HTTP Status
+		require.Equal(t, http.StatusNotFound, rr.Code)
+
+		// Assert: Error Response Structure
+		var errResp controlapi.ErrorResponse
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &errResp))
+		assert.Equal(t, "ERR_NOT_FOUND", errResp.Code)
+		assert.Contains(t, errResp.Message, nonExistentKey)
+	})
+
+	t.Run("DELETE /flags/{key} - Cache Event Published", func(t *testing.T) {
+		// Arrange: Create a flag and clear any existing queue events
+		key := fmt.Sprintf("delete-cache-%d", time.Now().UnixNano())
+
+		createReq := controlapi.CreateFlagRequest{
+			Key:          key,
+			Name:         "Delete Cache Test",
+			Enabled:      true,
+			DefaultValue: false,
+		}
+
+		createBody, _ := json.Marshal(createReq)
+		createHTTPReq := httptest.NewRequest(http.MethodPost, "/api/v1/flags", bytes.NewReader(createBody))
+		createHTTPReq.Header.Set("Content-Type", "application/json")
+		createRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(createRR, createHTTPReq)
+		require.Equal(t, http.StatusCreated, createRR.Code)
+
+		// Clear the queue to isolate the delete event
+		verifierClient.Del(ctx, "heimdall:queue:updates")
+
+		// Act: Delete the flag
+		req := httptest.NewRequest(http.MethodDelete, "/api/v1/flags/"+key, nil)
+		rr := httptest.NewRecorder()
+		api.Router.ServeHTTP(rr, req)
+		require.Equal(t, http.StatusNoContent, rr.Code)
+
+		// Assert: Side Effect - Cache event was published to Redis queue
+		// We verify that the API actually pushed the key to the 'heimdall:queue:updates' list.
+		require.Eventually(t, func() bool {
+			// Check if list has items
+			length, err := verifierClient.LLen(ctx, "heimdall:queue:updates").Result()
+			if err != nil || length == 0 {
+				return false
+			}
+
+			// Check if the item is indeed our key
+			val, err := verifierClient.LPop(ctx, "heimdall:queue:updates").Result()
+			return err == nil && val == key
+		}, 2*time.Second, 100*time.Millisecond, "Flag key must appear in Redis update queue")
+	})
 }

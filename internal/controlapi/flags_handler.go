@@ -255,6 +255,51 @@ func (a *API) handleGetFlag(w http.ResponseWriter, r *http.Request) {
 	render.JSON(w, r, resp)
 }
 
+// handleDeleteFlag processes the DELETE /api/v1/flags/{key} request.
+//
+// Responsibilities:
+// 1. Extracts the {key} path parameter.
+// 2. Calls the Repository to delete the flag.
+// 3. Handles not found errors (404).
+// 4. Notifies cache asynchronously to invalidate the flag.
+// 5. Returns 204 No Content on success.
+func (a *API) handleDeleteFlag(w http.ResponseWriter, r *http.Request) {
+	log := logger.FromContext(r.Context())
+
+	// 1. Extract Path Parameter
+	key := chi.URLParam(r, "key")
+
+	// 2. Call Repository
+	err := a.flags.DeleteFlag(r.Context(), key)
+	if err != nil {
+		// Check if it's a "not found" error
+		if strings.Contains(err.Error(), "not found") {
+			render.Status(r, http.StatusNotFound)
+			render.JSON(w, r, ErrorResponse{
+				Code:    "ERR_NOT_FOUND",
+				Message: fmt.Sprintf("Flag with key '%s' not found", key),
+			})
+			return
+		}
+
+		// System Error: Internal Server Error
+		log.Error("failed to delete flag from db", slog.String("key", key), slog.String("error", err.Error()))
+		render.Status(r, http.StatusInternalServerError)
+		render.JSON(w, r, ErrorResponse{
+			Code:    "ERR_INTERNAL",
+			Message: "Failed to delete flag",
+		})
+		return
+	}
+
+	// 3. Async Notification
+	a.notifyCacheAsync(log, key)
+
+	// 4. Return Success (204 No Content)
+	log.Info("flag deleted successfully", slog.String("flag_key", key))
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // --- Private Helpers ---
 
 // parseOptionalInt extracts an integer from the query string.
