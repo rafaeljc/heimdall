@@ -5,7 +5,6 @@ package controlapi
 import (
 	"encoding/json"
 	"regexp"
-	"strings"
 	"time"
 )
 
@@ -113,14 +112,6 @@ type CreateFlagRequest struct {
 	// Rules is the optional list of targeting rules for this flag.
 	// Allow it to be omitted or null in the payload.
 	Rules json.RawMessage `json:"rules,omitempty"`
-}
-
-// Sanitize cleans up input data by trimming whitespace and normalizing case.
-// This prevents "dirty" data from entering the system logic.
-func (r *CreateFlagRequest) Sanitize() {
-	r.Key = strings.ToLower(strings.TrimSpace(r.Key))
-	r.Name = strings.TrimSpace(r.Name)
-	r.Description = strings.TrimSpace(r.Description)
 }
 
 // Validate checks if the request data adheres to business rules.

@@ -22,7 +22,7 @@ import (
 //
 // Responsibilities:
 // 1. Decodes the JSON payload into the CreateFlagRequest DTO.
-// 2. Sanitizes and Validates the input using the DTO's business logic.
+// 2. Validates the input using the DTO's business logic.
 // 3. Converts the DTO to the domain model (store.Flag).
 // 4. Persists the flag using the Repository layer.
 // 5. Handles specific persistence errors (e.g., conflicts).
@@ -42,12 +42,8 @@ func (a *API) handleCreateFlag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. Sanitize & Validate
+	// 2. Validate
 	// We delegate this logic to the DTO to keep the handler clean and testable.
-	// Sanitize modifies the struct in-place (trimming spaces, lowercasing keys).
-	req.Sanitize()
-
-	// Validate checks business rules (length, format, required fields).
 	if errResp := req.Validate(); errResp != nil {
 		render.Status(r, http.StatusBadRequest)
 		render.JSON(w, r, errResp)
@@ -119,7 +115,7 @@ func (a *API) handleCreateFlag(w http.ResponseWriter, r *http.Request) {
 // handleListFlags processes the GET /api/v1/flags request.
 //
 // Responsibilities:
-// 1. Parses and sanitizes pagination parameters (page, page_size).
+// 1. Parses and validates pagination parameters (page, page_size).
 // 2. Calls the Repository to fetch data and total count.
 // 3. Maps domain models to DTOs.
 // 4. Calculates pagination metadata (total pages).
@@ -149,7 +145,7 @@ func (a *API) handleListFlags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. Sanitize & Clamp (Logic Validation)
+	// 2. Clamp (Logic Validation)
 	// We silently correct out-of-bounds values to ensure system stability and UX.
 	if page < 1 {
 		page = 1
