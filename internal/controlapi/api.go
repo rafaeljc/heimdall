@@ -24,10 +24,36 @@ type API struct {
 
 	// cache is used to publish flag update events to subscribers.
 	cache cache.Service
+
+	// apiKeyHash is the SHA-256 hash of the valid API key.
+	// Used for authentication in production environments.
+	apiKeyHash string
+
+	// skipAuth disables authentication when true (test/dev environments only).
+	// Production environments should always set this to false.
+	skipAuth bool
 }
 
-// NewAPI creates a new API instance and configures its routes.
-func NewAPI(flagRepo store.FlagRepository, cacheSvc cache.Service) *API {
+// NewAPI creates a new API instance with authentication enabled by default.
+// The apiKeyHash parameter must be the SHA-256 hash of the API key.
+// Panics if apiKeyHash is empty, as authentication cannot be disabled with this constructor.
+func NewAPI(flagRepo store.FlagRepository, cacheSvc cache.Service, apiKeyHash string) *API {
+	return NewAPIWithConfig(flagRepo, cacheSvc, apiKeyHash, false)
+}
+
+// NewAPIWithConfig creates a new API instance with explicit control over authentication.
+// This constructor is primarily used in tests to disable authentication.
+//
+// Parameters:
+//   - flagRepo: Repository for flag operations
+//   - cacheSvc: Cache service for event publishing
+//   - apiKeyHash: SHA-256 hash of the valid API key (required if skipAuth is false)
+//   - skipAuth: If true, disables authentication (USE ONLY IN TESTS)
+//
+// Panics if:
+//   - flagRepo or cacheSvc are nil
+//   - apiKeyHash is empty when skipAuth is false
+func NewAPIWithConfig(flagRepo store.FlagRepository, cacheSvc cache.Service, apiKeyHash string, skipAuth bool) *API {
 	// We check the interface explicitly.
 	// An interface is only nil if it has no underlying type and no value.
 	if flagRepo == nil {
@@ -37,10 +63,17 @@ func NewAPI(flagRepo store.FlagRepository, cacheSvc cache.Service) *API {
 		panic("controlapi: cache service cannot be nil")
 	}
 
+	// Validate authentication configuration
+	if !skipAuth && apiKeyHash == "" {
+		panic("controlapi: apiKeyHash cannot be empty when authentication is enabled")
+	}
+
 	api := &API{
-		Router: chi.NewRouter(),
-		flags:  flagRepo,
-		cache:  cacheSvc,
+		Router:     chi.NewRouter(),
+		flags:      flagRepo,
+		cache:      cacheSvc,
+		apiKeyHash: apiKeyHash,
+		skipAuth:   skipAuth,
 	}
 
 	api.configureRoutes()
@@ -61,11 +94,14 @@ func (a *API) configureRoutes() {
 	// Content-Type: Forces JSON content type for API responses.
 	a.Router.Use(render.SetContentType(render.ContentTypeJSON))
 
-	// 2. System Routes
+	// 2. Public Routes (no authentication required)
 	a.Router.Get("/health", a.handleHealthCheck)
 
-	// 3. API V1 Routes
+	// 3. Protected API V1 Routes (authentication required)
 	a.Router.Route("/api/v1", func(r chi.Router) {
+		// Apply authentication middleware to all /api/v1/* routes
+		r.Use(a.authenticateAPIKey)
+
 		r.Route("/flags", func(r chi.Router) {
 			r.Post("/", a.handleCreateFlag)
 			r.Get("/", a.handleListFlags)

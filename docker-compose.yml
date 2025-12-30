@@ -46,6 +46,7 @@ services:
       - DATABASE_URL=postgres://user:password@postgres:5432/heimdall?sslmode=disable
       - REDIS_URL=redis:6379
       - LOG_LEVEL=debug
+      - API_KEY_HASH=${API_KEY_HASH:-}  # Optional: set via .env file or shell
     depends_on:
       postgres:
         condition: service_healthy
