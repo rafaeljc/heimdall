@@ -1,11 +1,15 @@
 package controlapi
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/render"
 	"github.com/rafaeljc/heimdall/internal/logger"
 )
 
@@ -64,5 +68,54 @@ func RequestLogger(next http.Handler) http.Handler {
 			slog.String("duration", duration.String()),
 			slog.String("remote_ip", r.RemoteAddr),
 		)
+	})
+}
+
+// authenticateAPIKey is a middleware that validates the X-API-Key header
+// against the configured API key hash using constant-time comparison.
+//
+// If skipAuth is enabled (typically in test environments), authentication
+// is bypassed entirely.
+//
+// Security considerations:
+// - Uses crypto/subtle.ConstantTimeCompare to prevent timing attacks
+// - Never logs or returns the actual key or hash
+// - Returns 401 Unauthorized for missing or invalid keys
+func (a *API) authenticateAPIKey(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip authentication if configured (test/dev mode)
+		if a.skipAuth {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Extract API key from X-API-Key header
+		apiKey := r.Header.Get("X-API-Key")
+		if apiKey == "" {
+			render.Status(r, http.StatusUnauthorized)
+			render.JSON(w, r, ErrorResponse{
+				Code:    "ERR_UNAUTHORIZED",
+				Message: "missing X-API-Key header",
+			})
+			return
+		}
+
+		// Hash the provided key using SHA-256
+		hash := sha256.Sum256([]byte(apiKey))
+		hashHex := hex.EncodeToString(hash[:])
+
+		// Constant-time comparison to prevent timing attacks
+		// Returns 1 if equal, 0 otherwise
+		if subtle.ConstantTimeCompare([]byte(hashHex), []byte(a.apiKeyHash)) != 1 {
+			render.Status(r, http.StatusUnauthorized)
+			render.JSON(w, r, ErrorResponse{
+				Code:    "ERR_UNAUTHORIZED",
+				Message: "invalid API key",
+			})
+			return
+		}
+
+		// Authentication successful, proceed to handler
+		next.ServeHTTP(w, r)
 	})
 }
