@@ -252,4 +252,464 @@ func TestPostgresStore_Integration(t *testing.T) {
 				"ordering violation at index %d: ID %d should be < %d (ASC)", i, currentID, nextID)
 		}
 	})
+
+	t.Run("UpdateFlag_PartialUpdate_NameOnly", func(t *testing.T) {
+		// Arrange: Create a flag
+		flag := &store.Flag{
+			Key:          "update-name-only-" + fmt.Sprint(time.Now().UnixNano()),
+			Name:         "Original Name",
+			Description:  "Original Description",
+			Enabled:      false,
+			DefaultValue: false,
+		}
+		err := repo.CreateFlag(ctx, flag)
+		require.NoError(t, err)
+		require.Equal(t, int64(1), flag.Version)
+
+		// Act: Update only the name
+		newName := "Updated Name"
+		params := &store.UpdateFlagParams{
+			Key:     flag.Key,
+			Version: flag.Version,
+			Name:    &newName,
+		}
+
+		updated, err := repo.UpdateFlag(ctx, params)
+
+		// Assert
+		require.NoError(t, err)
+		assert.Equal(t, "Updated Name", updated.Name)
+		assert.Equal(t, "Original Description", updated.Description, "description should remain unchanged")
+		assert.False(t, updated.Enabled, "enabled should remain unchanged")
+		assert.False(t, updated.DefaultValue, "default_value should remain unchanged")
+		assert.Equal(t, int64(2), updated.Version)
+	})
+
+	t.Run("UpdateFlag_PartialUpdate_MultipleFields", func(t *testing.T) {
+		// Arrange
+		flag := &store.Flag{
+			Key:          "update-multi-" + fmt.Sprint(time.Now().UnixNano()),
+			Name:         "Original",
+			Description:  "Original Desc",
+			Enabled:      false,
+			DefaultValue: false,
+		}
+		err := repo.CreateFlag(ctx, flag)
+		require.NoError(t, err)
+
+		// Act: Update name, enabled, and default_value
+		newName := "New Name"
+		newEnabled := true
+		newDefault := true
+		params := &store.UpdateFlagParams{
+			Key:          flag.Key,
+			Version:      flag.Version,
+			Name:         &newName,
+			Enabled:      &newEnabled,
+			DefaultValue: &newDefault,
+		}
+
+		updated, err := repo.UpdateFlag(ctx, params)
+
+		// Assert
+		require.NoError(t, err)
+		assert.Equal(t, "New Name", updated.Name)
+		assert.Equal(t, "Original Desc", updated.Description, "description should remain unchanged")
+		assert.True(t, updated.Enabled)
+		assert.True(t, updated.DefaultValue)
+		assert.Equal(t, int64(2), updated.Version)
+	})
+
+	t.Run("UpdateFlag_AddRules", func(t *testing.T) {
+		// Arrange: Create flag without rules
+		flag := &store.Flag{
+			Key:  "update-add-rules-" + fmt.Sprint(time.Now().UnixNano()),
+			Name: "Flag Without Rules",
+		}
+		err := repo.CreateFlag(ctx, flag)
+		require.NoError(t, err)
+		assert.Empty(t, flag.Rules)
+
+		// Act: Add rules
+		newRules := []ruleengine.Rule{
+			{
+				ID:   "rule-1",
+				Type: ruleengine.RuleTypeUserIDList,
+			},
+			{
+				ID:   "rule-2",
+				Type: ruleengine.RuleTypePercentage,
+			},
+		}
+		params := &store.UpdateFlagParams{
+			Key:     flag.Key,
+			Version: flag.Version,
+			Rules:   &newRules,
+		}
+
+		updated, err := repo.UpdateFlag(ctx, params)
+
+		// Assert
+		require.NoError(t, err)
+		require.Len(t, updated.Rules, 2)
+		assert.Equal(t, "rule-1", updated.Rules[0].ID)
+		assert.Equal(t, "rule-2", updated.Rules[1].ID)
+		assert.Equal(t, int64(2), updated.Version)
+	})
+
+	t.Run("UpdateFlag_ReplaceRules", func(t *testing.T) {
+		// Arrange: Create flag with initial rules
+		flag := &store.Flag{
+			Key:  "update-replace-rules-" + fmt.Sprint(time.Now().UnixNano()),
+			Name: "Flag With Rules",
+			Rules: []ruleengine.Rule{
+				{
+					ID:   "old-rule",
+					Type: ruleengine.RuleTypeUserIDList,
+				},
+			},
+		}
+		err := repo.CreateFlag(ctx, flag)
+		require.NoError(t, err)
+
+		// Act: Replace with new rules
+		newRules := []ruleengine.Rule{
+			{
+				ID:   "new-rule",
+				Type: ruleengine.RuleTypePercentage,
+			},
+		}
+		params := &store.UpdateFlagParams{
+			Key:     flag.Key,
+			Version: flag.Version,
+			Rules:   &newRules,
+		}
+
+		updated, err := repo.UpdateFlag(ctx, params)
+
+		// Assert
+		require.NoError(t, err)
+		require.Len(t, updated.Rules, 1)
+		assert.Equal(t, "new-rule", updated.Rules[0].ID)
+		assert.Equal(t, ruleengine.RuleTypePercentage, updated.Rules[0].Type)
+		assert.Equal(t, int64(2), updated.Version)
+	})
+
+	t.Run("UpdateFlag_ClearRules", func(t *testing.T) {
+		// Arrange: Create flag with rules
+		flag := &store.Flag{
+			Key:  "update-clear-rules-" + fmt.Sprint(time.Now().UnixNano()),
+			Name: "Flag To Clear",
+			Rules: []ruleengine.Rule{
+				{
+					ID:   "rule-to-delete",
+					Type: ruleengine.RuleTypeUserIDList,
+				},
+			},
+		}
+		err := repo.CreateFlag(ctx, flag)
+		require.NoError(t, err)
+
+		// Act: Clear rules with empty array
+		emptyRules := []ruleengine.Rule{}
+		params := &store.UpdateFlagParams{
+			Key:     flag.Key,
+			Version: flag.Version,
+			Rules:   &emptyRules,
+		}
+
+		updated, err := repo.UpdateFlag(ctx, params)
+
+		// Assert
+		require.NoError(t, err)
+		assert.Empty(t, updated.Rules)
+		assert.Equal(t, int64(2), updated.Version)
+	})
+
+	t.Run("UpdateFlag_VersionConflict", func(t *testing.T) {
+		// Arrange: Create flag
+		flag := &store.Flag{
+			Key:  "update-conflict-" + fmt.Sprint(time.Now().UnixNano()),
+			Name: "Conflict Test",
+		}
+		err := repo.CreateFlag(ctx, flag)
+		require.NoError(t, err)
+
+		// Simulate concurrent update
+		newName := "First Update"
+		params1 := &store.UpdateFlagParams{
+			Key:     flag.Key,
+			Version: flag.Version,
+			Name:    &newName,
+		}
+		_, err = repo.UpdateFlag(ctx, params1)
+		require.NoError(t, err)
+
+		// Act: Try to update with stale version
+		staleName := "Stale Update"
+		params2 := &store.UpdateFlagParams{
+			Key:     flag.Key,
+			Version: 1, // Stale version!
+			Name:    &staleName,
+		}
+
+		updated, err := repo.UpdateFlag(ctx, params2)
+
+		// Assert
+		assert.Error(t, err)
+		assert.Nil(t, updated)
+		assert.Contains(t, err.Error(), "conflict")
+
+		// Verify the flag wasn't updated
+		fetched, err := repo.GetFlagByKey(ctx, flag.Key)
+		require.NoError(t, err)
+		assert.Equal(t, "First Update", fetched.Name)
+		assert.Equal(t, int64(2), fetched.Version)
+	})
+
+	t.Run("UpdateFlag_NotFound", func(t *testing.T) {
+		// Arrange: Non-existent flag
+		newName := "Ghost Name"
+		params := &store.UpdateFlagParams{
+			Key:     "non-existent-" + fmt.Sprint(time.Now().UnixNano()),
+			Version: 1,
+			Name:    &newName,
+		}
+
+		// Act
+		updated, err := repo.UpdateFlag(ctx, params)
+
+		// Assert
+		assert.Error(t, err)
+		assert.Nil(t, updated)
+		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("UpdateFlag_MultipleSequentialUpdates", func(t *testing.T) {
+		// Arrange
+		flag := &store.Flag{
+			Key:  "update-sequential-" + fmt.Sprint(time.Now().UnixNano()),
+			Name: "Version 1",
+		}
+		err := repo.CreateFlag(ctx, flag)
+		require.NoError(t, err)
+
+		// Act: Perform 5 sequential updates
+		currentVersion := flag.Version
+		for i := 2; i <= 6; i++ {
+			newName := fmt.Sprintf("Version %d", i)
+			params := &store.UpdateFlagParams{
+				Key:     flag.Key,
+				Version: currentVersion,
+				Name:    &newName,
+			}
+
+			updated, err := repo.UpdateFlag(ctx, params)
+			require.NoError(t, err)
+			assert.Equal(t, int64(i), updated.Version)
+			currentVersion = updated.Version
+		}
+
+		// Assert final state
+		fetched, err := repo.GetFlagByKey(ctx, flag.Key)
+		require.NoError(t, err)
+		assert.Equal(t, "Version 6", fetched.Name)
+		assert.Equal(t, int64(6), fetched.Version)
+	})
+
+	t.Run("UpdateFlag_BooleanFields_SetToFalse", func(t *testing.T) {
+		// Arrange: Create flag with true values
+		flag := &store.Flag{
+			Key:          "update-bool-" + fmt.Sprint(time.Now().UnixNano()),
+			Name:         "Bool Test",
+			Enabled:      true,
+			DefaultValue: true,
+		}
+		err := repo.CreateFlag(ctx, flag)
+		require.NoError(t, err)
+
+		// Act: Explicitly set to false (important to test pointer semantics)
+		newEnabled := false
+		newDefault := false
+		params := &store.UpdateFlagParams{
+			Key:          flag.Key,
+			Version:      flag.Version,
+			Enabled:      &newEnabled,
+			DefaultValue: &newDefault,
+		}
+
+		updated, err := repo.UpdateFlag(ctx, params)
+
+		// Assert: false values should be applied
+		require.NoError(t, err)
+		assert.False(t, updated.Enabled, "enabled should be explicitly set to false")
+		assert.False(t, updated.DefaultValue, "default_value should be explicitly set to false")
+		assert.Equal(t, int64(2), updated.Version)
+	})
+
+	t.Run("DeleteFlag_Success", func(t *testing.T) {
+		// Arrange: Create a flag to delete
+		flag := &store.Flag{
+			Key:  "delete-test-" + fmt.Sprint(time.Now().UnixNano()),
+			Name: "Flag to Delete",
+		}
+		err := repo.CreateFlag(ctx, flag)
+		require.NoError(t, err)
+
+		// Verify it exists
+		fetched, err := repo.GetFlagByKey(ctx, flag.Key)
+		require.NoError(t, err)
+		assert.Equal(t, flag.Key, fetched.Key)
+
+		// Act: Delete the flag
+		err = repo.DeleteFlag(ctx, flag.Key)
+
+		// Assert
+		require.NoError(t, err)
+
+		// Verify it no longer exists
+		_, err = repo.GetFlagByKey(ctx, flag.Key)
+		assert.Error(t, err, "flag should not exist after deletion")
+		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("DeleteFlag_NotFound", func(t *testing.T) {
+		// Arrange: Non-existent flag key
+		nonExistentKey := "non-existent-delete-" + fmt.Sprint(time.Now().UnixNano())
+
+		// Act
+		err := repo.DeleteFlag(ctx, nonExistentKey)
+
+		// Assert
+		assert.Error(t, err, "should return error for non-existent flag")
+		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("DeleteFlag_WithRules", func(t *testing.T) {
+		// Arrange: Create flag with rules
+		flag := &store.Flag{
+			Key:  "delete-with-rules-" + fmt.Sprint(time.Now().UnixNano()),
+			Name: "Flag with Rules",
+			Rules: []ruleengine.Rule{
+				{
+					ID:   "rule-1",
+					Type: ruleengine.RuleTypeUserIDList,
+				},
+				{
+					ID:   "rule-2",
+					Type: ruleengine.RuleTypePercentage,
+				},
+			},
+		}
+		err := repo.CreateFlag(ctx, flag)
+		require.NoError(t, err)
+
+		// Act: Delete the flag (including its JSONB rules)
+		err = repo.DeleteFlag(ctx, flag.Key)
+
+		// Assert
+		require.NoError(t, err)
+
+		// Verify complete deletion
+		_, err = repo.GetFlagByKey(ctx, flag.Key)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("DeleteFlag_DoesNotAffectOtherFlags", func(t *testing.T) {
+		// Arrange: Create two flags
+		flag1 := &store.Flag{
+			Key:  "delete-isolation-1-" + fmt.Sprint(time.Now().UnixNano()),
+			Name: "Flag 1",
+		}
+		flag2 := &store.Flag{
+			Key:  "delete-isolation-2-" + fmt.Sprint(time.Now().UnixNano()),
+			Name: "Flag 2",
+		}
+		err := repo.CreateFlag(ctx, flag1)
+		require.NoError(t, err)
+		err = repo.CreateFlag(ctx, flag2)
+		require.NoError(t, err)
+
+		// Act: Delete only flag1
+		err = repo.DeleteFlag(ctx, flag1.Key)
+		require.NoError(t, err)
+
+		// Assert: flag1 is gone, flag2 remains
+		_, err = repo.GetFlagByKey(ctx, flag1.Key)
+		assert.Error(t, err, "flag1 should be deleted")
+
+		fetched, err := repo.GetFlagByKey(ctx, flag2.Key)
+		require.NoError(t, err, "flag2 should still exist")
+		assert.Equal(t, flag2.Key, fetched.Key)
+		assert.Equal(t, flag2.Name, fetched.Name)
+	})
+
+	t.Run("DeleteFlag_IdempotencyCheck", func(t *testing.T) {
+		// Arrange: Create a flag
+		flag := &store.Flag{
+			Key:  "delete-idempotent-" + fmt.Sprint(time.Now().UnixNano()),
+			Name: "Idempotent Test",
+		}
+		err := repo.CreateFlag(ctx, flag)
+		require.NoError(t, err)
+
+		// Act: Delete once (should succeed)
+		err = repo.DeleteFlag(ctx, flag.Key)
+		require.NoError(t, err)
+
+		// Act: Try to delete again (should fail)
+		err = repo.DeleteFlag(ctx, flag.Key)
+
+		// Assert: Second delete should fail
+		assert.Error(t, err, "deleting non-existent flag should error")
+		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("DeleteFlag_AffectsListOperations", func(t *testing.T) {
+		// Arrange: Create multiple flags
+		prefix := "delete-list-test-" + fmt.Sprint(time.Now().UnixNano())
+		flags := make([]*store.Flag, 3)
+		for i := 0; i < 3; i++ {
+			flags[i] = &store.Flag{
+				Key:  fmt.Sprintf("%s-%d", prefix, i),
+				Name: fmt.Sprintf("List Test Flag %d", i),
+			}
+			err := repo.CreateFlag(ctx, flags[i])
+			require.NoError(t, err)
+		}
+
+		// Get initial count
+		_, initialTotal, err := repo.ListFlags(ctx, 100, 0)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, initialTotal, int64(3))
+
+		// Act: Delete one flag
+		err = repo.DeleteFlag(ctx, flags[1].Key)
+		require.NoError(t, err)
+
+		// Assert: Total count should decrease
+		afterFlags, afterTotal, err := repo.ListFlags(ctx, 100, 0)
+		require.NoError(t, err)
+		assert.Equal(t, initialTotal-1, afterTotal, "total count should decrease by 1")
+
+		// Verify the deleted flag is not in the list
+		for _, f := range afterFlags {
+			assert.NotEqual(t, flags[1].Key, f.Key, "deleted flag should not appear in list")
+		}
+
+		// Verify other flags still exist
+		foundFlag0 := false
+		foundFlag2 := false
+		for _, f := range afterFlags {
+			if f.Key == flags[0].Key {
+				foundFlag0 = true
+			}
+			if f.Key == flags[2].Key {
+				foundFlag2 = true
+			}
+		}
+		assert.True(t, foundFlag0, "flag 0 should still exist")
+		assert.True(t, foundFlag2, "flag 2 should still exist")
+	})
 }

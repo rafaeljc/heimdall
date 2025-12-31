@@ -5,7 +5,9 @@ package syncer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -229,9 +231,30 @@ func (s *Service) updateCacheWithRetry(ctx context.Context, f *store.Flag) error
 }
 
 // syncSingleFlag fetches a flag from the repository and updates the cache.
+// If the flag no longer exists in the database, it removes it from Redis
+// and broadcasts an invalidation event to data-plane instances.
 func (s *Service) syncSingleFlag(ctx context.Context, key string) error {
 	flag, err := s.repo.GetFlagByKey(ctx, key)
 	if err != nil {
+		// Check if the flag was deleted (not found in database)
+		if isNotFoundError(err) {
+			s.logger.Info("flag deleted, removing from cache", slog.String("key", key))
+
+			// Remove from Redis L2 cache
+			if delErr := s.cache.DeleteFlag(ctx, key); delErr != nil {
+				return fmt.Errorf("failed to delete flag from cache: %w", delErr)
+			}
+
+			// Broadcast invalidation so data-plane can clear L1 cache
+			if broadcastErr := s.cache.BroadcastUpdate(ctx, key); broadcastErr != nil {
+				s.logger.Error("failed to broadcast deletion",
+					slog.String("key", key),
+					slog.String("error", broadcastErr.Error()))
+				// Don't fail the sync - cache removal succeeded
+			}
+
+			return nil
+		}
 		return err
 	}
 	return s.updateCache(ctx, flag)
@@ -257,4 +280,13 @@ func (s *Service) updateCache(ctx context.Context, f *store.Flag) error {
 	}
 
 	return nil
+}
+
+// isNotFoundError checks if the error indicates a flag was not found in the database.
+func isNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Check for "flag not found" message from GetFlagByKey
+	return strings.Contains(err.Error(), "flag not found")
 }

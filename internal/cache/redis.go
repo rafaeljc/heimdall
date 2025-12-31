@@ -81,6 +81,9 @@ type Service interface {
 	// Returns nil, nil if the key does not exist.
 	GetFlag(ctx context.Context, key string) (*ruleengine.FeatureFlag, error)
 
+	// DeleteFlag removes a flag from Redis.
+	DeleteFlag(ctx context.Context, key string) error
+
 	// Queue
 	PublishUpdate(ctx context.Context, flagKey string) error
 	WaitForUpdate(ctx context.Context, timeout time.Duration) (string, error)
@@ -191,6 +194,12 @@ func (c *RedisCache) GetFlag(ctx context.Context, key string) (*ruleengine.Featu
 	}
 
 	return &flag, nil
+}
+
+// DeleteFlag removes a flag from Redis.
+func (c *RedisCache) DeleteFlag(ctx context.Context, key string) error {
+	redisKey := fmt.Sprintf("%s:%s", KeyPrefix, key)
+	return c.client.Del(ctx, redisKey).Err()
 }
 
 // PublishUpdate adds a flag key to the update queue.

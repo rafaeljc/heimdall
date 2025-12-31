@@ -75,6 +75,12 @@ func run() error {
 		return fmt.Errorf("REDIS_URL environment variable is required")
 	}
 
+	// API Key Authentication
+	apiKeyHash := os.Getenv("API_KEY_HASH")
+	if apiKeyHash == "" {
+		return fmt.Errorf("API_KEY_HASH environment variable is required")
+	}
+
 	// Create a background context for the initialization phase
 	ctx := context.Background()
 
@@ -101,8 +107,8 @@ func run() error {
 	flagStore := store.NewPostgresStore(pgPool)
 
 	// Layer 2: API (Controller)
-	// Inject the repository into the API handler.
-	api := controlapi.NewAPI(flagStore, redisCache)
+	// Inject the repository into the API handler with authentication enabled.
+	api := controlapi.NewAPI(flagStore, redisCache, apiKeyHash)
 
 	// -------------------------------------------------------------------------
 	// 3. HTTP Server Setup

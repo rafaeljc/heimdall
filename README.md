@@ -104,6 +104,9 @@ This will start:
 | `task build:docker` | Builds Production Docker images |
 | **Code Generation** | |
 | `task generate:proto` | Generates Go code from `.proto` files |
+| **Security** | |
+| `task sec:genkey` | Generates a new API key and its SHA-256 hash |
+| `task sec:hash` | Computes SHA-256 hash for an existing API key |
 
 ## 🧠 Engineering Decisions (ADRs)
 

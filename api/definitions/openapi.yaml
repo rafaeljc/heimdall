@@ -31,10 +31,65 @@ components:
 
   schemas:
     # --- Domain Models ---
+    Rule:
+      type: object
+      description: Represents a targeting rule for conditional flag evaluation.
+      required: [id, type, value]
+      properties:
+        id:
+          type: string
+          example: "rule-123e4567-e89b-12d3-a456-426614174000"
+          description: Unique identifier for the rule.
+        type:
+          type: string
+          enum: [USER_ID_LIST, PERCENTAGE]
+          example: "USER_ID_LIST"
+          description: |
+            Rule type discriminator that determines the evaluation strategy:
+            - USER_ID_LIST: Matches specific user IDs (allowlist/denylist)
+            - PERCENTAGE: Gradual rollout based on consistent hashing
+        value:
+          type: object
+          description: |
+            Rule-specific configuration. Structure varies by type:
+            - USER_ID_LIST: {"user_ids": ["user1", "user2"]}
+            - PERCENTAGE: {"percentage": 50, "attribute": "user_id"}
+          oneOf:
+            - $ref: '#/components/schemas/UserIDListRuleValue'
+            - $ref: '#/components/schemas/PercentageRuleValue'
+
+    UserIDListRuleValue:
+      type: object
+      required: [user_ids]
+      properties:
+        user_ids:
+          type: array
+          items:
+            type: string
+          maxItems: 10000
+          example: ["user-123", "user-456"]
+          description: List of user IDs to match. Limited to 10,000 entries to maintain P99 < 20ms SLO.
+
+    PercentageRuleValue:
+      type: object
+      required: [percentage]
+      properties:
+        percentage:
+          type: integer
+          minimum: 0
+          maximum: 100
+          example: 25
+          description: Percentage of users to target (0-100).
+        attribute:
+          type: string
+          default: "user_id"
+          example: "user_id"
+          description: Context attribute to use for consistent hashing. Defaults to "user_id".
+
     Flag:
       type: object
       description: Represents a feature flag definition matching the PostgreSQL schema.
-      required: [id, key, name, enabled, default_value, created_at, updated_at]
+      required: [id, key, name, enabled, default_value, rules, version, created_at, updated_at]
       properties:
         id:
           type: integer
@@ -68,6 +123,33 @@ components:
           type: boolean
           example: false
           description: Fallback value returned when the flag is enabled but no rule matches.
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/Rule'
+          default: []
+          example:
+            - id: "rule-1"
+              type: "USER_ID_LIST"
+              value:
+                user_ids: ["beta-user-1", "beta-user-2"]
+            - id: "rule-2"
+              type: "PERCENTAGE"
+              value:
+                percentage: 10
+                attribute: "user_id"
+          description: |
+            Ordered list of targeting rules. Evaluated sequentially until first match.
+            Empty array means no rules (flag uses default_value).
+        version:
+          type: integer
+          format: int64
+          minimum: 1
+          example: 1
+          description: |
+            Monotonic version counter for optimistic locking. Incremented on each update.
+            Used to prevent race conditions in concurrent updates.
+          readOnly: true
         created_at:
           type: string
           format: date-time
@@ -79,7 +161,7 @@ components:
           format: date-time
           readOnly: true
           example: "2025-11-21T11:30:00Z"
-          description: Timestamp of creation. Always returned in UTC (ISO 8601 / RFC 3339).
+          description: Timestamp of last update. Always returned in UTC (ISO 8601 / RFC 3339).
 
     # --- Request Bodies ---
     CreateFlagRequest:
@@ -107,10 +189,17 @@ components:
         default_value:
           type: boolean
           default: false
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/Rule'
+          default: []
+          description: Optional list of targeting rules. Defaults to empty array if omitted.
 
     UpdateFlagRequest:
       type: object
-      description: Fields to be updated. All fields are optional (PATCH semantics).
+      required: [version]
+      description: Fields to be updated. All fields are optional except version (PATCH semantics with optimistic locking).
       properties:
         name:
           type: string
@@ -122,6 +211,19 @@ components:
           type: boolean
         default_value:
           type: boolean
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/Rule'
+          description: Replaces the entire rules array. To clear rules, send an empty array.
+        version:
+          type: integer
+          format: int64
+          minimum: 1
+          description: |
+            Current version number for optimistic locking. Required to prevent lost
+            updates in concurrent modification scenarios. Must match the database version.
+          example: 5
 
     # --- Responses & Metadata ---
     PaginatedFlagList:
@@ -276,7 +378,9 @@ paths:
 
     patch:
       summary: Update a flag
-      description: Updates specific fields of a flag (Partial Update).
+      description: |
+        Updates specific fields of a flag (Partial Update).
+        The version field in the response indicates the new version after update.
       operationId: updateFlag
       tags: [Flags]
       requestBody:
@@ -304,6 +408,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '409':
+          description: |
+            Conflict - Version mismatch. The flag has been modified by another request.
+            Client should fetch the latest version and retry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: "ERR_VERSION_CONFLICT"
+                message: "Version mismatch: expected 5, current version is 6"
 
     delete:
       summary: Delete a flag
