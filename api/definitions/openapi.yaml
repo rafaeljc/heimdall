@@ -6,7 +6,8 @@ info:
     Management API for the Heimdall Feature Flag system.
     
     This API allows administrators and services to manage the lifecycle of feature flags.
-    It follows RESTful principles, enforces API Key authentication, and uses offset-based pagination.
+    It follows RESTful principles, enforces API Key authentication, uses offset-based pagination,
+    and implements ETag-based optimistic locking for safe concurrent updates.
   version: 1.0.0
   contact:
     name: Heimdall Team
@@ -89,7 +90,7 @@ components:
     Flag:
       type: object
       description: Represents a feature flag definition matching the PostgreSQL schema.
-      required: [id, key, name, enabled, default_value, rules, version, created_at, updated_at]
+      required: [id, key, name, enabled, default_value, rules, created_at, updated_at]
       properties:
         id:
           type: integer
@@ -141,15 +142,6 @@ components:
           description: |
             Ordered list of targeting rules. Evaluated sequentially until first match.
             Empty array means no rules (flag uses default_value).
-        version:
-          type: integer
-          format: int64
-          minimum: 1
-          example: 1
-          description: |
-            Monotonic version counter for optimistic locking. Incremented on each update.
-            Used to prevent race conditions in concurrent updates.
-          readOnly: true
         created_at:
           type: string
           format: date-time
@@ -198,8 +190,9 @@ components:
 
     UpdateFlagRequest:
       type: object
-      required: [version]
-      description: Fields to be updated. All fields are optional except version (PATCH semantics with optimistic locking).
+      description: |
+        Fields to be updated. All fields are optional (PATCH semantics).
+        Optimistic locking is enforced via the If-Match header with the ETag value.
       properties:
         name:
           type: string
@@ -216,14 +209,6 @@ components:
           items:
             $ref: '#/components/schemas/Rule'
           description: Replaces the entire rules array. To clear rules, send an empty array.
-        version:
-          type: integer
-          format: int64
-          minimum: 1
-          description: |
-            Current version number for optimistic locking. Required to prevent lost
-            updates in concurrent modification scenarios. Must match the database version.
-          example: 5
 
     # --- Responses & Metadata ---
     PaginatedFlagList:
@@ -331,6 +316,19 @@ paths:
       responses:
         '201':
           description: Flag created successfully
+          headers:
+            ETag:
+              schema:
+                type: string
+              description: |
+                Entity tag for the created flag. Format: "<sequence_number>".
+                Used for optimistic locking in subsequent updates.
+              example: "1"
+            Cache-Control:
+              schema:
+                type: string
+              description: Cache control directive.
+              example: "no-cache"
           content:
             application/json:
               schema:
@@ -365,6 +363,19 @@ paths:
       responses:
         '200':
           description: Flag details
+          headers:
+            ETag:
+              schema:
+                type: string
+              description: |
+                Entity tag representing the current version of the flag.
+                Format: "<sequence_number>". Required for subsequent updates.
+              example: "5"
+            Cache-Control:
+              schema:
+                type: string
+              description: Cache control directive.
+              example: "no-cache"
           content:
             application/json:
               schema:
@@ -380,9 +391,19 @@ paths:
       summary: Update a flag
       description: |
         Updates specific fields of a flag (Partial Update).
-        The version field in the response indicates the new version after update.
+        Requires the If-Match header with the current ETag to prevent lost updates.
       operationId: updateFlag
       tags: [Flags]
+      parameters:
+        - in: header
+          name: If-Match
+          schema:
+            type: string
+          required: true
+          description: |
+            ETag value from a previous GET request. Used for optimistic locking.
+            Must match the current version of the flag or the update will fail with 412.
+          example: "5"
       requestBody:
         required: true
         content:
@@ -392,6 +413,18 @@ paths:
       responses:
         '200':
           description: Flag updated successfully
+          headers:
+            ETag:
+              schema:
+                type: string
+              description: |
+                New entity tag after the update. Save this for subsequent updates.
+              example: "6"
+            Cache-Control:
+              schema:
+                type: string
+              description: Cache control directive.
+              example: "no-cache"
           content:
             application/json:
               schema:
@@ -408,25 +441,66 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-        '409':
+        '412':
           description: |
-            Conflict - Version mismatch. The flag has been modified by another request.
-            Client should fetch the latest version and retry.
+            Precondition Failed - The If-Match ETag does not match the current version.
+            The flag has been modified by another request.
+            Client must GET the latest flag state before retrying the update.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
               example:
-                code: "ERR_VERSION_CONFLICT"
-                message: "Version mismatch: expected 5, current version is 6"
+                code: "ERR_PRECONDITION_FAILED"
+                message: "The flag has been modified. Please fetch the latest version and retry."
+        '428':
+          description: |
+            Precondition Required - The If-Match header is missing.
+            All updates require an ETag for optimistic locking.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: "ERR_PRECONDITION_REQUIRED"
+                message: "The If-Match header is required for updates. Please fetch the flag first to obtain an ETag."
 
     delete:
       summary: Delete a flag
-      description: Permanently removes a feature flag.
+      description: |
+        Deletes a feature flag.
+        Requires the If-Match header with the current ETag to prevent accidental deletion.
       operationId: deleteFlag
       tags: [Flags]
+      parameters:
+        - in: header
+          name: If-Match
+          schema:
+            type: string
+          required: true
+          description: |
+            ETag value from a previous GET request. Used for optimistic locking.
+            Must match the current version of the flag or the delete will fail with 412.
+          example: "5"
       responses:
         '204':
           description: Flag deleted successfully
         '404':
           description: Flag not found
+        '412':
+          description: |
+            Precondition Failed - The If-Match ETag does not match the current version.
+            The flag has been modified by another request.
+            Client must GET the latest flag state before retrying the delete.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '428':
+          description: |
+            Precondition Required - The If-Match header is missing.
+            All deletes require an ETag for optimistic locking.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
