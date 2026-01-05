@@ -110,7 +110,9 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 		assert.False(t, resp.UpdatedAt.IsZero(), "Server must generate UpdatedAt")
 
 		// Validate Rules & Versioning
-		assert.Equal(t, int64(1), resp.Version, "New flags must start at Version 1")
+		// Version is now communicated via ETag header
+		etag := rr.Header().Get("ETag")
+		assert.Equal(t, `"1"`, etag, "New flags must start at Version 1")
 		assert.JSONEq(t, "[]", string(resp.Rules), "Rules should be an empty JSON array []")
 
 		// Validate Side Effect (Redis Queue)
@@ -153,7 +155,6 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 		// Validate "Secure by Default" behavior
 		assert.False(t, resp.Enabled, "should default to disabled (false)")
 		assert.False(t, resp.DefaultValue, "should default to false")
-		assert.Equal(t, int64(1), resp.Version)
 		assert.JSONEq(t, "[]", string(resp.Rules))
 	})
 
@@ -454,7 +455,6 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 		assert.Equal(t, "Test flag for GET endpoint", resp.Description)
 		assert.True(t, resp.Enabled)
 		assert.True(t, resp.DefaultValue)
-		assert.Equal(t, int64(1), resp.Version)
 		assert.NotZero(t, resp.ID)
 		assert.False(t, resp.CreatedAt.IsZero())
 		assert.False(t, resp.UpdatedAt.IsZero())
@@ -532,9 +532,11 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 		createRR := httptest.NewRecorder()
 		api.Router.ServeHTTP(createRR, createHTTPReq)
 		require.Equal(t, http.StatusCreated, createRR.Code)
+		createdETag := createRR.Header().Get("ETag")
 
 		// Act: Delete the flag
 		req := httptest.NewRequest(http.MethodDelete, "/api/v1/flags/"+key, nil)
+		req.Header.Set("If-Match", createdETag)
 		rr := httptest.NewRecorder()
 		api.Router.ServeHTTP(rr, req)
 
@@ -555,6 +557,7 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 
 		// Act
 		req := httptest.NewRequest(http.MethodDelete, "/api/v1/flags/"+nonExistentKey, nil)
+		req.Header.Set("If-Match", `"1"`)
 		rr := httptest.NewRecorder()
 		api.Router.ServeHTTP(rr, req)
 
@@ -589,8 +592,14 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 		// Clear the queue to isolate the delete event
 		verifierClient.Del(ctx, "heimdall:queue:updates")
 
+		// Capture ETag from create response
+		var createdFlag controlapi.Flag
+		json.Unmarshal(createRR.Body.Bytes(), &createdFlag)
+		createdETag := createRR.Header().Get("ETag")
+
 		// Act: Delete the flag
 		req := httptest.NewRequest(http.MethodDelete, "/api/v1/flags/"+key, nil)
+		req.Header.Set("If-Match", createdETag)
 		rr := httptest.NewRecorder()
 		api.Router.ServeHTTP(rr, req)
 		require.Equal(t, http.StatusNoContent, rr.Code)
@@ -635,7 +644,8 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 
 		var createdFlag controlapi.Flag
 		json.Unmarshal(createRR.Body.Bytes(), &createdFlag)
-		assert.Equal(t, int64(1), createdFlag.Version)
+		createdETag := createRR.Header().Get("ETag")
+		assert.Equal(t, `"1"`, createdETag, "Initial version should be 1")
 
 		// Act: Update only name and enabled fields
 		newName := "Updated Name"
@@ -648,6 +658,7 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 		updateBody, _ := json.Marshal(updateReq)
 		req := httptest.NewRequest(http.MethodPatch, "/api/v1/flags/"+key, bytes.NewReader(updateBody))
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("If-Match", createdETag)
 		rr := httptest.NewRecorder()
 		api.Router.ServeHTTP(rr, req)
 
@@ -666,8 +677,9 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 		assert.Equal(t, "Original Description", resp.Description)
 		assert.False(t, resp.DefaultValue)
 
-		// Assert: Version incremented
-		assert.Equal(t, int64(2), resp.Version)
+		// Assert: Version incremented (check ETag header)
+		updatedETag := rr.Header().Get("ETag")
+		assert.Equal(t, `"2"`, updatedETag, "Version should be incremented to 2")
 
 		// Assert: Timestamps
 		assert.False(t, resp.UpdatedAt.IsZero())
@@ -686,6 +698,7 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 		updateBody, _ := json.Marshal(updateReq)
 		req := httptest.NewRequest(http.MethodPatch, "/api/v1/flags/"+nonExistentKey, bytes.NewReader(updateBody))
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("If-Match", `"1"`)
 		rr := httptest.NewRecorder()
 		api.Router.ServeHTTP(rr, req)
 
@@ -714,6 +727,7 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 		createRR := httptest.NewRecorder()
 		api.Router.ServeHTTP(createRR, createHTTPReq)
 		require.Equal(t, http.StatusCreated, createRR.Code)
+		createdETag := createRR.Header().Get("ETag")
 
 		tests := []struct {
 			name           string
@@ -752,6 +766,7 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 				body, _ := json.Marshal(tt.payload)
 				req := httptest.NewRequest(http.MethodPatch, "/api/v1/flags/"+key, bytes.NewReader(body))
 				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("If-Match", createdETag)
 				rr := httptest.NewRecorder()
 				api.Router.ServeHTTP(rr, req)
 
@@ -780,6 +795,7 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 		createRR := httptest.NewRecorder()
 		api.Router.ServeHTTP(createRR, createHTTPReq)
 		require.Equal(t, http.StatusCreated, createRR.Code)
+		createdETag := createRR.Header().Get("ETag")
 
 		// Clear the queue to isolate the update event
 		verifierClient.Del(ctx, "heimdall:queue:updates")
@@ -793,6 +809,7 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 		updateBody, _ := json.Marshal(updateReq)
 		req := httptest.NewRequest(http.MethodPatch, "/api/v1/flags/"+key, bytes.NewReader(updateBody))
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("If-Match", createdETag)
 		rr := httptest.NewRecorder()
 		api.Router.ServeHTTP(rr, req)
 		require.Equal(t, http.StatusOK, rr.Code)
@@ -1071,6 +1088,7 @@ func TestAuthentication_Integration(t *testing.T) {
 		updateBody, _ := json.Marshal(updateInput)
 		req := httptest.NewRequest(http.MethodPatch, "/api/v1/flags/"+key, bytes.NewReader(updateBody))
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("If-Match", `"1"`)
 		rr := httptest.NewRecorder()
 
 		api.Router.ServeHTTP(rr, req)
@@ -1095,6 +1113,7 @@ func TestAuthentication_Integration(t *testing.T) {
 		createRR := httptest.NewRecorder()
 		api.Router.ServeHTTP(createRR, createReq)
 		require.Equal(t, http.StatusCreated, createRR.Code)
+		createdETag := createRR.Header().Get("ETag")
 
 		// Update with authentication
 		updateInput := controlapi.UpdateFlagRequest{
@@ -1106,6 +1125,7 @@ func TestAuthentication_Integration(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPatch, "/api/v1/flags/"+key, bytes.NewReader(updateBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-API-Key", testAPIKey)
+		req.Header.Set("If-Match", createdETag)
 		rr := httptest.NewRecorder()
 
 		api.Router.ServeHTTP(rr, req)
@@ -1133,6 +1153,7 @@ func TestAuthentication_Integration(t *testing.T) {
 
 		// Try to delete without authentication
 		req := httptest.NewRequest(http.MethodDelete, "/api/v1/flags/"+key, nil)
+		req.Header.Set("If-Match", `"1"`)
 		rr := httptest.NewRecorder()
 
 		api.Router.ServeHTTP(rr, req)
@@ -1157,15 +1178,334 @@ func TestAuthentication_Integration(t *testing.T) {
 		createRR := httptest.NewRecorder()
 		api.Router.ServeHTTP(createRR, createReq)
 		require.Equal(t, http.StatusCreated, createRR.Code)
+		createdETag := createRR.Header().Get("ETag")
 
 		// Delete with authentication
 		req := httptest.NewRequest(http.MethodDelete, "/api/v1/flags/"+key, nil)
 		req.Header.Set("X-API-Key", testAPIKey)
+		req.Header.Set("If-Match", createdETag)
 		rr := httptest.NewRecorder()
 
 		api.Router.ServeHTTP(rr, req)
 
 		assert.Equal(t, http.StatusNoContent, rr.Code, "Should return 204 No Content with valid API key")
+	})
+}
+
+// TestHeaderRequirementsAndResponses validates HTTP header behavior according to the API contract.
+// This includes If-Match requirements, ETag responses, and Cache-Control headers.
+func TestHeaderRequirementsAndResponses(t *testing.T) {
+	// 1. Infrastructure Setup
+	ctx := context.Background()
+
+	pgContainer, err := testsupport.StartPostgresContainer(ctx, "../../migrations")
+	require.NoError(t, err, "failed to start postgres container")
+	defer func() {
+		if err := pgContainer.Terminate(ctx); err != nil {
+			t.Logf("failed to terminate container: %v", err)
+		}
+	}()
+
+	redisContainer, err := testsupport.StartRedisContainer(ctx)
+	require.NoError(t, err, "failed to start redis container")
+	defer func() {
+		if err := redisContainer.Terminate(ctx); err != nil {
+			t.Logf("failed to terminate redis container: %v", err)
+		}
+	}()
+
+	repo := store.NewPostgresStore(pgContainer.DB)
+	api := controlapi.NewAPIWithConfig(repo, redisContainer.Client, "", true)
+
+	// -------------------------------------------------------------------------
+	// ETag Header Tests
+	// -------------------------------------------------------------------------
+
+	t.Run("POST /flags should return ETag header with version", func(t *testing.T) {
+		key := fmt.Sprintf("etag-post-%d", time.Now().UnixNano())
+		input := controlapi.CreateFlagRequest{
+			Key:  key,
+			Name: "ETag Test Flag",
+		}
+		body, _ := json.Marshal(input)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/flags", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+
+		api.Router.ServeHTTP(rr, req)
+
+		require.Equal(t, http.StatusCreated, rr.Code)
+		etag := rr.Header().Get("ETag")
+		assert.NotEmpty(t, etag, "ETag header must be present")
+		assert.Equal(t, `"1"`, etag, "Initial version should be 1")
+
+		// Verify Cache-Control header
+		cacheControl := rr.Header().Get("Cache-Control")
+		assert.Equal(t, "no-cache", cacheControl, "Cache-Control header must be no-cache")
+	})
+
+	t.Run("GET /flags/{key} should return ETag and Cache-Control headers", func(t *testing.T) {
+		// Create a flag first
+		key := fmt.Sprintf("etag-get-%d", time.Now().UnixNano())
+		createInput := controlapi.CreateFlagRequest{
+			Key:  key,
+			Name: "ETag GET Test",
+		}
+		createBody, _ := json.Marshal(createInput)
+		createReq := httptest.NewRequest(http.MethodPost, "/api/v1/flags", bytes.NewReader(createBody))
+		createReq.Header.Set("Content-Type", "application/json")
+		createRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(createRR, createReq)
+		require.Equal(t, http.StatusCreated, createRR.Code)
+
+		// Now GET the flag
+		getReq := httptest.NewRequest(http.MethodGet, "/api/v1/flags/"+key, nil)
+		getRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(getRR, getReq)
+
+		require.Equal(t, http.StatusOK, getRR.Code)
+		etag := getRR.Header().Get("ETag")
+		assert.NotEmpty(t, etag, "ETag header must be present")
+		assert.Equal(t, `"1"`, etag, "Version should be 1")
+
+		cacheControl := getRR.Header().Get("Cache-Control")
+		assert.Equal(t, "no-cache", cacheControl, "Cache-Control must be no-cache")
+	})
+
+	t.Run("PATCH /flags/{key} should return updated ETag", func(t *testing.T) {
+		// Create a flag
+		key := fmt.Sprintf("etag-patch-%d", time.Now().UnixNano())
+		createInput := controlapi.CreateFlagRequest{
+			Key:  key,
+			Name: "Original Name",
+		}
+		createBody, _ := json.Marshal(createInput)
+		createReq := httptest.NewRequest(http.MethodPost, "/api/v1/flags", bytes.NewReader(createBody))
+		createReq.Header.Set("Content-Type", "application/json")
+		createRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(createRR, createReq)
+		require.Equal(t, http.StatusCreated, createRR.Code)
+		originalETag := createRR.Header().Get("ETag")
+
+		// Update the flag
+		updateInput := map[string]any{"name": "Updated Name"}
+		updateBody, _ := json.Marshal(updateInput)
+		updateReq := httptest.NewRequest(http.MethodPatch, "/api/v1/flags/"+key, bytes.NewReader(updateBody))
+		updateReq.Header.Set("Content-Type", "application/json")
+		updateReq.Header.Set("If-Match", originalETag)
+		updateRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(updateRR, updateReq)
+
+		require.Equal(t, http.StatusOK, updateRR.Code)
+		newETag := updateRR.Header().Get("ETag")
+		assert.NotEmpty(t, newETag, "ETag header must be present")
+		assert.Equal(t, `"2"`, newETag, "Version should be incremented to 2")
+		assert.NotEqual(t, originalETag, newETag, "ETag must change after update")
+
+		cacheControl := updateRR.Header().Get("Cache-Control")
+		assert.Equal(t, "no-cache", cacheControl, "Cache-Control must be no-cache")
+	})
+
+	// -------------------------------------------------------------------------
+	// If-Match Header Requirements
+	// -------------------------------------------------------------------------
+
+	t.Run("PATCH /flags/{key} without If-Match should return 428 Precondition Required", func(t *testing.T) {
+		// Create a flag
+		key := fmt.Sprintf("ifmatch-missing-%d", time.Now().UnixNano())
+		createInput := controlapi.CreateFlagRequest{
+			Key:  key,
+			Name: "Test Flag",
+		}
+		createBody, _ := json.Marshal(createInput)
+		createReq := httptest.NewRequest(http.MethodPost, "/api/v1/flags", bytes.NewReader(createBody))
+		createReq.Header.Set("Content-Type", "application/json")
+		createRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(createRR, createReq)
+		require.Equal(t, http.StatusCreated, createRR.Code)
+
+		// Try to update without If-Match
+		updateInput := map[string]any{"name": "Updated"}
+		updateBody, _ := json.Marshal(updateInput)
+		updateReq := httptest.NewRequest(http.MethodPatch, "/api/v1/flags/"+key, bytes.NewReader(updateBody))
+		updateReq.Header.Set("Content-Type", "application/json")
+		// Deliberately NOT setting If-Match
+		updateRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(updateRR, updateReq)
+
+		assert.Equal(t, http.StatusPreconditionRequired, updateRR.Code, "Should return 428 without If-Match")
+
+		var errResp controlapi.ErrorResponse
+		require.NoError(t, json.Unmarshal(updateRR.Body.Bytes(), &errResp))
+		assert.Equal(t, "ERR_PRECONDITION_REQUIRED", errResp.Code)
+		assert.Contains(t, errResp.Message, "If-Match")
+	})
+
+	t.Run("DELETE /flags/{key} without If-Match should return 428 Precondition Required", func(t *testing.T) {
+		// Create a flag
+		key := fmt.Sprintf("delete-ifmatch-%d", time.Now().UnixNano())
+		createInput := controlapi.CreateFlagRequest{
+			Key:  key,
+			Name: "Test Flag",
+		}
+		createBody, _ := json.Marshal(createInput)
+		createReq := httptest.NewRequest(http.MethodPost, "/api/v1/flags", bytes.NewReader(createBody))
+		createReq.Header.Set("Content-Type", "application/json")
+		createRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(createRR, createReq)
+		require.Equal(t, http.StatusCreated, createRR.Code)
+
+		// Try to delete without If-Match
+		deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/flags/"+key, nil)
+		// Deliberately NOT setting If-Match
+		deleteRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(deleteRR, deleteReq)
+
+		assert.Equal(t, http.StatusPreconditionRequired, deleteRR.Code, "Should return 428 without If-Match")
+
+		var errResp controlapi.ErrorResponse
+		require.NoError(t, json.Unmarshal(deleteRR.Body.Bytes(), &errResp))
+		assert.Equal(t, "ERR_PRECONDITION_REQUIRED", errResp.Code)
+		assert.Contains(t, errResp.Message, "If-Match")
+	})
+
+	t.Run("DELETE /flags/{key} with invalid If-Match format should return 428", func(t *testing.T) {
+		// Create a flag
+		key := fmt.Sprintf("delete-ifmatch-invalid-%d", time.Now().UnixNano())
+		createInput := controlapi.CreateFlagRequest{
+			Key:  key,
+			Name: "Test Flag",
+		}
+		createBody, _ := json.Marshal(createInput)
+		createReq := httptest.NewRequest(http.MethodPost, "/api/v1/flags", bytes.NewReader(createBody))
+		createReq.Header.Set("Content-Type", "application/json")
+		createRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(createRR, createReq)
+		require.Equal(t, http.StatusCreated, createRR.Code)
+
+		// Try to delete with malformed If-Match
+		deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/flags/"+key, nil)
+		deleteReq.Header.Set("If-Match", "not-a-number")
+		deleteRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(deleteRR, deleteReq)
+
+		assert.Equal(t, http.StatusPreconditionRequired, deleteRR.Code, "Should return 428 with invalid If-Match")
+
+		var errResp controlapi.ErrorResponse
+		require.NoError(t, json.Unmarshal(deleteRR.Body.Bytes(), &errResp))
+		assert.Equal(t, "ERR_INVALID_ETAG", errResp.Code)
+		assert.Contains(t, errResp.Message, "Invalid ETag")
+	})
+
+	t.Run("PATCH /flags/{key} with invalid If-Match format should return 428", func(t *testing.T) {
+		// Create a flag
+		key := fmt.Sprintf("ifmatch-invalid-%d", time.Now().UnixNano())
+		createInput := controlapi.CreateFlagRequest{
+			Key:  key,
+			Name: "Test Flag",
+		}
+		createBody, _ := json.Marshal(createInput)
+		createReq := httptest.NewRequest(http.MethodPost, "/api/v1/flags", bytes.NewReader(createBody))
+		createReq.Header.Set("Content-Type", "application/json")
+		createRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(createRR, createReq)
+		require.Equal(t, http.StatusCreated, createRR.Code)
+
+		// Try to update with malformed If-Match
+		updateInput := map[string]any{"name": "Updated"}
+		updateBody, _ := json.Marshal(updateInput)
+		updateReq := httptest.NewRequest(http.MethodPatch, "/api/v1/flags/"+key, bytes.NewReader(updateBody))
+		updateReq.Header.Set("Content-Type", "application/json")
+		updateReq.Header.Set("If-Match", "not-a-number")
+		updateRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(updateRR, updateReq)
+
+		assert.Equal(t, http.StatusPreconditionRequired, updateRR.Code, "Should return 428 with invalid If-Match")
+
+		var errResp controlapi.ErrorResponse
+		require.NoError(t, json.Unmarshal(updateRR.Body.Bytes(), &errResp))
+		assert.Equal(t, "ERR_INVALID_ETAG", errResp.Code)
+		assert.Contains(t, errResp.Message, "Invalid ETag")
+	})
+
+	t.Run("PATCH /flags/{key} with version conflict should return 412 Precondition Failed", func(t *testing.T) {
+		// Create a flag
+		key := fmt.Sprintf("version-conflict-%d", time.Now().UnixNano())
+		createInput := controlapi.CreateFlagRequest{
+			Key:  key,
+			Name: "Original Name",
+		}
+		createBody, _ := json.Marshal(createInput)
+		createReq := httptest.NewRequest(http.MethodPost, "/api/v1/flags", bytes.NewReader(createBody))
+		createReq.Header.Set("Content-Type", "application/json")
+		createRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(createRR, createReq)
+		require.Equal(t, http.StatusCreated, createRR.Code)
+		etag := createRR.Header().Get("ETag")
+
+		// Update the flag once to change version
+		updateInput1 := map[string]any{"name": "First Update"}
+		updateBody1, _ := json.Marshal(updateInput1)
+		updateReq1 := httptest.NewRequest(http.MethodPatch, "/api/v1/flags/"+key, bytes.NewReader(updateBody1))
+		updateReq1.Header.Set("Content-Type", "application/json")
+		updateReq1.Header.Set("If-Match", etag)
+		updateRR1 := httptest.NewRecorder()
+		api.Router.ServeHTTP(updateRR1, updateReq1)
+		require.Equal(t, http.StatusOK, updateRR1.Code)
+
+		// Try to update again with the OLD etag (should fail)
+		updateInput2 := map[string]interface{}{"name": "Second Update"}
+		updateBody2, _ := json.Marshal(updateInput2)
+		updateReq2 := httptest.NewRequest(http.MethodPatch, "/api/v1/flags/"+key, bytes.NewReader(updateBody2))
+		updateReq2.Header.Set("Content-Type", "application/json")
+		updateReq2.Header.Set("If-Match", etag) // Using old ETag
+		updateRR2 := httptest.NewRecorder()
+		api.Router.ServeHTTP(updateRR2, updateReq2)
+
+		assert.Equal(t, http.StatusPreconditionFailed, updateRR2.Code, "Should return 412 on version conflict")
+
+		var errResp controlapi.ErrorResponse
+		require.NoError(t, json.Unmarshal(updateRR2.Body.Bytes(), &errResp))
+		assert.Equal(t, "ERR_PRECONDITION_FAILED", errResp.Code)
+		assert.Contains(t, errResp.Message, "modified")
+	})
+
+	t.Run("DELETE /flags/{key} with version conflict should return 412", func(t *testing.T) {
+		// Create a flag
+		key := fmt.Sprintf("delete-conflict-%d", time.Now().UnixNano())
+		createInput := controlapi.CreateFlagRequest{
+			Key:  key,
+			Name: "Test Flag",
+		}
+		createBody, _ := json.Marshal(createInput)
+		createReq := httptest.NewRequest(http.MethodPost, "/api/v1/flags", bytes.NewReader(createBody))
+		createReq.Header.Set("Content-Type", "application/json")
+		createRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(createRR, createReq)
+		require.Equal(t, http.StatusCreated, createRR.Code)
+		originalETag := createRR.Header().Get("ETag")
+
+		// Update the flag to change version
+		updateInput := map[string]any{"name": "Updated"}
+		updateBody, _ := json.Marshal(updateInput)
+		updateReq := httptest.NewRequest(http.MethodPatch, "/api/v1/flags/"+key, bytes.NewReader(updateBody))
+		updateReq.Header.Set("Content-Type", "application/json")
+		updateReq.Header.Set("If-Match", originalETag)
+		updateRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(updateRR, updateReq)
+		require.Equal(t, http.StatusOK, updateRR.Code)
+
+		// Try to delete with old ETag
+		deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/flags/"+key, nil)
+		deleteReq.Header.Set("If-Match", originalETag) // Using old ETag
+		deleteRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(deleteRR, deleteReq)
+
+		assert.Equal(t, http.StatusPreconditionFailed, deleteRR.Code, "Should return 412 on version conflict")
+
+		var errResp controlapi.ErrorResponse
+		require.NoError(t, json.Unmarshal(deleteRR.Body.Bytes(), &errResp))
+		assert.Equal(t, "ERR_PRECONDITION_FAILED", errResp.Code)
 	})
 }
 

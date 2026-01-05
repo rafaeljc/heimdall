@@ -36,9 +36,6 @@ type Flag struct {
 	// Rules is the ordered list of targeting strategies (JSONB).
 	Rules json.RawMessage `json:"rules"`
 
-	// Version is the monotonic counter for optimistic locking.
-	Version int64 `json:"version"`
-
 	// CreatedAt is the timestamp of creation in UTC.
 	CreatedAt time.Time `json:"created_at"`
 
