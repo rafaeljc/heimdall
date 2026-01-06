@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,11 +43,14 @@ const (
 			return 1
 		end
 
-		-- Case 2: Corrupted/Legacy Data Check
-		local pipe_pos = string.find(curr_val, "|")
+		-- Case 2: Find pipe separator (only search first 20 chars since int64 max is 19 digits)
+		local search_limit = math.min(20, string.len(curr_val))
+		local search_str = string.sub(curr_val, 1, search_limit)
+		local pipe_pos = string.find(search_str, "|", 1, true)
+		
 		if not pipe_pos then
 			redis.call("SET", key, new_val)
-			return 2 
+			return 2
 		end
 
 		local curr_ver = tonumber(string.sub(curr_val, 1, pipe_pos - 1))
@@ -75,7 +79,7 @@ var ErrQueueTimeout = errors.New("queue timeout")
 // This interface allows for dependency injection and mocking in tests.
 type Service interface {
 	// SetFlagSafely sets the flag data with optimistic locking based on version.
-	SetFlagSafely(ctx context.Context, key string, value interface{}, version int64) (SetResult, error)
+	SetFlagSafely(ctx context.Context, key string, value any, version int64) (SetResult, error)
 
 	// GetFlag retrieves and deserializes a specific flag.
 	// Returns nil, nil if the key does not exist.
@@ -147,14 +151,14 @@ func NewRedisCache(ctx context.Context, addr string) (*RedisCache, error) {
 }
 
 // SetFlagSafely sets the flag data in Redis using optimistic locking based on version.
-func (c *RedisCache) SetFlagSafely(ctx context.Context, key string, value interface{}, version int64) (SetResult, error) {
+func (c *RedisCache) SetFlagSafely(ctx context.Context, key string, value any, version int64) (SetResult, error) {
 	redisKey := fmt.Sprintf("%s:%s", KeyPrefix, key)
 	jsonBytes, err := json.Marshal(value)
 	if err != nil {
 		return 0, fmt.Errorf("marshal error: %w", err)
 	}
 
-	storageValue := fmt.Sprintf("%d|%s", version, string(jsonBytes))
+	storageValue := encodeFlag(jsonBytes, version)
 
 	res, err := c.script.Run(ctx, c.client, []string{redisKey}, storageValue, version).Int()
 	if err != nil {
@@ -176,12 +180,7 @@ func (c *RedisCache) GetFlag(ctx context.Context, key string) (*ruleengine.Featu
 		return nil, fmt.Errorf("failed to get flag from redis: %w", err)
 	}
 
-	// Parse Protocol: "version|json"
-	_, jsonPart, found := strings.Cut(val, "|")
-	if !found {
-		// Fallback for legacy/corrupted data that might be raw JSON
-		jsonPart = val
-	}
+	jsonPart := decodeFlag(val)
 
 	var flag ruleengine.FeatureFlag
 	if err := json.Unmarshal([]byte(jsonPart), &flag); err != nil {
@@ -290,4 +289,30 @@ func (c *RedisCache) HealthCheck(ctx context.Context) error {
 // Close closes the Redis client connection.
 func (c *RedisCache) Close() error {
 	return c.client.Close()
+}
+
+// encodeFlag encodes a flag's JSON bytes and version into storage format: "version|json"
+// Uses optimized string building to reduce allocations.
+func encodeFlag(jsonBytes []byte, version int64) string {
+	var buf strings.Builder
+	buf.Grow(len(jsonBytes) + 20) // version (max 20 digits) + pipe + json
+	buf.WriteString(strconv.FormatInt(version, 10))
+	buf.WriteByte('|')
+	buf.Write(jsonBytes)
+	return buf.String()
+}
+
+// decodeFlag extracts the JSON part from the storage format: "version|json"
+// Returns the JSON string, falling back to the raw value if no pipe separator is found.
+// Optimized to search only the first 20 characters (max digits in int64).
+func decodeFlag(value string) string {
+	// int64 max is 19 digits, so pipe must be within first 20 chars
+	searchLimit := min(len(value), 20)
+
+	pipePos := strings.IndexByte(value[:searchLimit], '|')
+	if pipePos == -1 {
+		return value // Fallback for corrupted data
+	}
+
+	return value[pipePos+1:]
 }
