@@ -52,11 +52,30 @@ func (a *API) Evaluate(ctx context.Context, req *pb.EvaluateRequest) (*pb.Evalua
 		}
 
 		if flag == nil {
+			// Flag doesn't exist in Redis: DO NOT CACHE
+			// Security: Prevents cache poisoning attacks where an attacker repeatedly
+			// requests non-existent flags to fill L1 cache with garbage and evict legitimate flags.
+			// Only tombstones from L2 (soft-deleted flags) are cached.
+			log.Debug("flag not found", slog.String("flag_key", req.FlagKey))
 			return nil, status.Error(codes.NotFound, "flag not found")
 		}
 
-		// 4. Cache Fill (Read-Through)
+		// 4. Cache Fill (Read-Through) - cache both active flags and tombstones from L2
+		// Only cache flags that exist in Redis (including soft-deleted tombstones)
+		// This prevents cache poisoning while still benefiting from negative caching for deleted flags
 		a.l1.Set(req.FlagKey, flag)
+
+		// If it's a tombstone (soft-deleted flag), return NOT_FOUND immediately
+		if flag.IsDeleted {
+			log.Debug("flag is soft-deleted (tombstone)", slog.String("flag_key", req.FlagKey))
+			return nil, status.Error(codes.NotFound, "flag not found")
+		}
+	}
+
+	// Check if the L1 cached flag is a tombstone
+	if flag.IsDeleted {
+		log.Debug("cached flag is soft-deleted (tombstone)", slog.String("flag_key", req.FlagKey))
+		return nil, status.Error(codes.NotFound, "flag not found")
 	}
 
 	// 5. Optimization: Short-Circuit
