@@ -73,7 +73,7 @@ func TestPostgresStore_Integration(t *testing.T) {
 		// We query the DB directly to prove persistence and data integrity.
 		var persistedFlag store.Flag
 		query := `
-			SELECT key, name, description, enabled, default_value, rules, version
+			SELECT key, name, description, enabled, default_value, rules, version, is_deleted
 			FROM flags 
 			WHERE id = $1
 		`
@@ -85,6 +85,7 @@ func TestPostgresStore_Integration(t *testing.T) {
 			&persistedFlag.DefaultValue,
 			&persistedFlag.Rules,
 			&persistedFlag.Version,
+			&persistedFlag.IsDeleted,
 		)
 		require.NoError(t, err, "failed to fetch created flag from DB for verification")
 
@@ -96,6 +97,7 @@ func TestPostgresStore_Integration(t *testing.T) {
 		assert.Equal(t, inputFlag.DefaultValue, persistedFlag.DefaultValue)
 		assert.Equal(t, int64(1), persistedFlag.Version)
 		assert.Empty(t, persistedFlag.Rules)
+		assert.False(t, persistedFlag.IsDeleted, "new flags should not be deleted")
 	})
 
 	t.Run("CreateFlag_Success_WithRules", func(t *testing.T) {
@@ -562,10 +564,11 @@ func TestPostgresStore_Integration(t *testing.T) {
 		assert.Equal(t, flag.Key, fetched.Key)
 
 		// Act: Delete the flag
-		err = repo.DeleteFlag(ctx, flag.Key)
+		deletedVersion, err := repo.DeleteFlag(ctx, flag.Key, fetched.Version)
 
 		// Assert
 		require.NoError(t, err)
+		assert.Greater(t, deletedVersion, fetched.Version, "deleted version should be incremented")
 
 		// Verify it no longer exists
 		_, err = repo.GetFlagByKey(ctx, flag.Key)
@@ -578,7 +581,7 @@ func TestPostgresStore_Integration(t *testing.T) {
 		nonExistentKey := "non-existent-delete-" + fmt.Sprint(time.Now().UnixNano())
 
 		// Act
-		err := repo.DeleteFlag(ctx, nonExistentKey)
+		_, err := repo.DeleteFlag(ctx, nonExistentKey, 1)
 
 		// Assert
 		assert.Error(t, err, "should return error for non-existent flag")
@@ -605,7 +608,7 @@ func TestPostgresStore_Integration(t *testing.T) {
 		require.NoError(t, err)
 
 		// Act: Delete the flag (including its JSONB rules)
-		err = repo.DeleteFlag(ctx, flag.Key)
+		_, err = repo.DeleteFlag(ctx, flag.Key, flag.Version)
 
 		// Assert
 		require.NoError(t, err)
@@ -632,7 +635,7 @@ func TestPostgresStore_Integration(t *testing.T) {
 		require.NoError(t, err)
 
 		// Act: Delete only flag1
-		err = repo.DeleteFlag(ctx, flag1.Key)
+		_, err = repo.DeleteFlag(ctx, flag1.Key, flag1.Version)
 		require.NoError(t, err)
 
 		// Assert: flag1 is gone, flag2 remains
@@ -655,11 +658,11 @@ func TestPostgresStore_Integration(t *testing.T) {
 		require.NoError(t, err)
 
 		// Act: Delete once (should succeed)
-		err = repo.DeleteFlag(ctx, flag.Key)
+		_, err = repo.DeleteFlag(ctx, flag.Key, flag.Version)
 		require.NoError(t, err)
 
 		// Act: Try to delete again (should fail)
-		err = repo.DeleteFlag(ctx, flag.Key)
+		_, err = repo.DeleteFlag(ctx, flag.Key, flag.Version)
 
 		// Assert: Second delete should fail
 		assert.Error(t, err, "deleting non-existent flag should error")
@@ -685,7 +688,7 @@ func TestPostgresStore_Integration(t *testing.T) {
 		require.GreaterOrEqual(t, initialTotal, int64(3))
 
 		// Act: Delete one flag
-		err = repo.DeleteFlag(ctx, flags[1].Key)
+		_, err = repo.DeleteFlag(ctx, flags[1].Key, flags[1].Version)
 		require.NoError(t, err)
 
 		// Assert: Total count should decrease
@@ -711,5 +714,68 @@ func TestPostgresStore_Integration(t *testing.T) {
 		}
 		assert.True(t, foundFlag0, "flag 0 should still exist")
 		assert.True(t, foundFlag2, "flag 2 should still exist")
+	})
+
+	t.Run("DeleteFlag_AllowsKeyReuse_AfterSoftDelete", func(t *testing.T) {
+		// This test validates the partial unique index behavior from migration 003.
+		// The index `idx_flags_key_active` allows the same key to exist multiple times
+		// as long as only one has is_deleted = FALSE.
+
+		// Arrange: Create a flag
+		testKey := "reusable-key-" + fmt.Sprint(time.Now().UnixNano())
+		originalFlag := &store.Flag{
+			Key:         testKey,
+			Name:        "Original Flag",
+			Description: "This will be deleted",
+			Enabled:     true,
+		}
+		err := repo.CreateFlag(ctx, originalFlag)
+		require.NoError(t, err)
+
+		// Act 1: Soft delete the flag
+		deletedVersion, err := repo.DeleteFlag(ctx, testKey, originalFlag.Version)
+		require.NoError(t, err)
+
+		// Verify it's deleted (not returned by GetFlagByKey)
+		_, err = repo.GetFlagByKey(ctx, testKey)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not found")
+
+		// Act 2: Create a NEW flag with the SAME key
+		newFlag := &store.Flag{
+			Key:         testKey, // Same key as deleted flag
+			Name:        "New Flag",
+			Description: "This reuses the deleted key",
+			Enabled:     false,
+		}
+		err = repo.CreateFlag(ctx, newFlag)
+
+		// Assert: Creation should succeed due to partial unique index
+		require.NoError(t, err, "should be able to reuse key after soft delete")
+		assert.NotEqual(t, originalFlag.ID, newFlag.ID, "new flag should have different ID")
+		assert.Greater(t, newFlag.Version, deletedVersion, "new flag version should continue incrementing from deleted flag")
+		assert.False(t, newFlag.IsDeleted, "new flag should not be deleted")
+
+		// Verify the new flag is retrievable
+		fetched, err := repo.GetFlagByKey(ctx, testKey)
+		require.NoError(t, err)
+		assert.Equal(t, newFlag.ID, fetched.ID)
+		assert.Equal(t, "New Flag", fetched.Name)
+		assert.Equal(t, "This reuses the deleted key", fetched.Description)
+		assert.False(t, fetched.Enabled)
+
+		// Verify that both records exist in the database (one deleted, one active)
+		var count int
+		countQuery := `SELECT COUNT(*) FROM flags WHERE key = $1`
+		err = pgContainer.DB.QueryRow(ctx, countQuery, testKey).Scan(&count)
+		require.NoError(t, err)
+		assert.Equal(t, 2, count, "should have 2 records with same key (one deleted, one active)")
+
+		// Verify the deleted flag is marked as deleted in the DB
+		var deletedCount int
+		deletedQuery := `SELECT COUNT(*) FROM flags WHERE key = $1 AND is_deleted = TRUE`
+		err = pgContainer.DB.QueryRow(ctx, deletedQuery, testKey).Scan(&deletedCount)
+		require.NoError(t, err)
+		assert.Equal(t, 1, deletedCount, "should have exactly 1 deleted record")
 	})
 }

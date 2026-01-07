@@ -5,7 +5,6 @@ package syncer
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -116,7 +115,7 @@ func (s *Service) runConsumer(ctx context.Context) error {
 		default:
 		}
 
-		flagKey, err := s.cache.WaitForUpdate(ctx, s.config.PopTimeout)
+		flagKey, queuedVersion, err := s.cache.WaitForUpdate(ctx, s.config.PopTimeout)
 
 		// Handle context cancellation
 		if ctx.Err() != nil {
@@ -132,18 +131,21 @@ func (s *Service) runConsumer(ctx context.Context) error {
 			continue
 		}
 
-		s.processEventWithRetry(ctx, flagKey)
+		s.processEventWithRetry(ctx, flagKey, queuedVersion)
 	}
 }
 
 // processEventWithRetry processes a single flag update with retry logic.
-func (s *Service) processEventWithRetry(ctx context.Context, flagKey string) {
-	s.logger.Info("processing update", slog.String("key", flagKey))
+func (s *Service) processEventWithRetry(ctx context.Context, flagKey string, queuedVersion int64) {
+	s.logger.Info("processing update", slog.String("key", flagKey), slog.Int64("version", queuedVersion))
+
+	// Reconstruct message for ACK/DLQ operations
+	message := cache.EncodeQueueMessage(flagKey, queuedVersion)
 
 	var err error
 	for i := 0; i <= s.config.MaxRetries; i++ {
-		if err = s.syncSingleFlag(ctx, flagKey); err == nil {
-			if ackErr := s.cache.AckUpdate(ctx, flagKey); ackErr != nil {
+		if err = s.syncSingleFlag(ctx, flagKey, queuedVersion); err == nil {
+			if ackErr := s.cache.AckUpdate(ctx, message); ackErr != nil {
 				s.logger.Error("failed to ack update", slog.String("key", flagKey), slog.String("error", ackErr.Error()))
 			}
 			return
@@ -160,7 +162,7 @@ func (s *Service) processEventWithRetry(ctx context.Context, flagKey string) {
 	}
 
 	s.logger.Error("max retries reached, moving to DLQ", slog.String("key", flagKey))
-	if dlqErr := s.cache.MoveToDLQ(ctx, flagKey); dlqErr != nil {
+	if dlqErr := s.cache.MoveToDLQ(ctx, message); dlqErr != nil {
 		s.logger.Error("CRITICAL: failed to move to DLQ", slog.String("key", flagKey), slog.String("error", dlqErr.Error()))
 	}
 }
@@ -231,32 +233,43 @@ func (s *Service) updateCacheWithRetry(ctx context.Context, f *store.Flag) error
 }
 
 // syncSingleFlag fetches a flag from the repository and updates the cache.
-// If the flag no longer exists in the database, it removes it from Redis
-// and broadcasts an invalidation event to data-plane instances.
-func (s *Service) syncSingleFlag(ctx context.Context, key string) error {
-	flag, err := s.repo.GetFlagByKey(ctx, key)
+// Only syncs if the queued version matches the database version (prevents stale writes).
+// For soft-deleted flags, writes a tombstone to Redis instead of removing the key.
+func (s *Service) syncSingleFlag(ctx context.Context, key string, queuedVersion int64) error {
+	// Use GetFlagByKeyIncludingDeleted to distinguish soft-delete from "never existed"
+	flag, err := s.repo.GetFlagByKeyIncludingDeleted(ctx, key)
 	if err != nil {
-		// Check if the flag was deleted (not found in database)
+		// Check if the flag truly doesn't exist (never created)
 		if isNotFoundError(err) {
-			s.logger.Info("flag deleted, removing from cache", slog.String("key", key))
-
-			// Remove from Redis L2 cache
-			if delErr := s.cache.DeleteFlag(ctx, key); delErr != nil {
-				return fmt.Errorf("failed to delete flag from cache: %w", delErr)
-			}
-
-			// Broadcast invalidation so data-plane can clear L1 cache
-			if broadcastErr := s.cache.BroadcastUpdate(ctx, key); broadcastErr != nil {
-				s.logger.Error("failed to broadcast deletion",
-					slog.String("key", key),
-					slog.String("error", broadcastErr.Error()))
-				// Don't fail the sync - cache removal succeeded
-			}
-
+			s.logger.Info("flag does not exist, skipping", slog.String("key", key))
 			return nil
 		}
 		return err
 	}
+
+	// Version matching: only sync if queued version matches current DB version
+	if flag.Version != queuedVersion {
+		s.logger.Info("skipping stale event",
+			slog.String("key", key),
+			slog.Int64("queued_version", queuedVersion),
+			slog.Int64("db_version", flag.Version))
+		return nil
+	}
+
+	// Handle soft-deleted flags: convert to tombstone (clear unnecessary data)
+	if flag.IsDeleted {
+		s.logger.Info("flag soft-deleted, writing tombstone",
+			slog.String("key", key),
+			slog.Int64("version", flag.Version))
+
+		// Clear unnecessary fields for tombstone
+		flag.Name = ""
+		flag.Description = ""
+		flag.Enabled = false
+		flag.DefaultValue = false
+		flag.Rules = []ruleengine.Rule{}
+	}
+
 	return s.updateCache(ctx, flag)
 }
 
@@ -268,6 +281,7 @@ func (s *Service) updateCache(ctx context.Context, f *store.Flag) error {
 		DefaultValue: f.DefaultValue,
 		Rules:        f.Rules,
 		Version:      f.Version,
+		IsDeleted:    f.IsDeleted,
 	}
 
 	result, err := s.cache.SetFlagSafely(ctx, f.Key, domainFlag, f.Version)

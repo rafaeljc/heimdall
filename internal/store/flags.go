@@ -38,6 +38,10 @@ type Flag struct {
 	// in the distributed system (Redis overwrites).
 	Version int64 `db:"version"`
 
+	// IsDeleted indicates whether the flag has been soft-deleted.
+	// Soft deletion allows the same key to be reused after deletion.
+	IsDeleted bool `db:"is_deleted"`
+
 	CreatedAt time.Time `db:"created_at"`
 	UpdatedAt time.Time `db:"updated_at"`
 }
@@ -76,13 +80,20 @@ type FlagRepository interface {
 	// GetFlagByKey retrieves a flag by its unique key.
 	GetFlagByKey(ctx context.Context, key string) (*Flag, error)
 
+	// GetFlagByKeyIncludingDeleted retrieves a flag by its unique key, including soft-deleted flags.
+	// Used by the syncer to determine if a flag was soft-deleted (for tombstone creation).
+	GetFlagByKeyIncludingDeleted(ctx context.Context, key string) (*Flag, error)
+
 	// UpdateFlag performs a partial update with optimistic locking.
 	// Returns the updated flag or an error if version mismatch or flag not found.
 	UpdateFlag(ctx context.Context, params *UpdateFlagParams) (*Flag, error)
 
-	// DeleteFlag permanently removes a flag from the database by its key.
-	// Returns an error if the flag doesn't exist.
-	DeleteFlag(ctx context.Context, key string) error
+	// DeleteFlag performs a soft delete on a flag by setting is_deleted = TRUE.
+	// This allows the same key to be reused in the future while preserving history.
+	// Uses optimistic locking with version check to prevent concurrent deletion conflicts.
+	// Increments the version and returns the new version for cache invalidation.
+	// Returns an error if the flag doesn't exist, is already deleted, or version mismatch.
+	DeleteFlag(ctx context.Context, key string, version int64) (int64, error)
 }
 
 // PostgresStore is the implementation of FlagRepository backed by PostgreSQL.
@@ -99,7 +110,9 @@ func NewPostgresStore(db *pgxpool.Pool) *PostgresStore {
 }
 
 // CreateFlag inserts a new flag into the database.
-// It uses the RETURNING clause to get the server-generated ID and timestamps efficiently.
+// It uses a single atomic query with a CTE to calculate the next version for the key,
+// ensuring version continuity when reusing keys after soft delete. The composite index
+// on (key, version) makes the MAX operation efficient via index-only scan.
 func (s *PostgresStore) CreateFlag(ctx context.Context, f *Flag) error {
 	// Ensure Rules is not nil to avoid DB constraint errors if the driver behaves strictly,
 	// though our migration sets DEFAULT '[]'.
@@ -107,29 +120,38 @@ func (s *PostgresStore) CreateFlag(ctx context.Context, f *Flag) error {
 		f.Rules = []ruleengine.Rule{}
 	}
 
-	// We do NOT insert 'version' explicitly, letting the DB set DEFAULT 1.
-	// We scan it back via RETURNING to keep the struct in sync.
+	// Single atomic query: Calculate next version and insert.
+	// Uses backwards index scan (ORDER BY DESC LIMIT 1) instead of MAX for better performance.
+	// The idx_flags_key_version composite index enables O(1) lookup of the highest version.
+	// This is faster than MAX() because it stops at the first match without aggregation.
 	query := `
-		INSERT INTO flags (key, name, description, enabled, default_value, rules)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, version, created_at, updated_at
+		WITH next_version AS (
+			SELECT COALESCE(
+				(SELECT version FROM flags WHERE key = $1 ORDER BY version DESC LIMIT 1),
+				0
+			) + 1 AS version
+		)
+		INSERT INTO flags (key, name, description, enabled, default_value, rules, version, is_deleted)
+		SELECT $1, $2, $3, $4, $5, $6, next_version.version, $7
+		FROM next_version
+		RETURNING id, version, is_deleted, created_at, updated_at
 	`
 
-	// Execute query and map return values directly to the struct fields
 	err := s.db.QueryRow(ctx, query,
 		f.Key,
 		f.Name,
 		f.Description,
 		f.Enabled,
 		f.DefaultValue,
-		f.Rules, // pgx automatically marshals this to JSONB
-	).Scan(&f.ID, &f.Version, &f.CreatedAt, &f.UpdatedAt)
+		f.Rules,
+		false, // is_deleted = FALSE for new flags
+	).Scan(&f.ID, &f.Version, &f.IsDeleted, &f.CreatedAt, &f.UpdatedAt)
 
 	if err != nil {
 		// Handle specific database errors explicitly.
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) {
-			// Error Code 23505: unique_violation
+			// Error Code 23505: unique_violation on idx_flags_key_active
 			if pgErr.Code == "23505" {
 				return fmt.Errorf("flag with key %q already exists", f.Key)
 			}
@@ -146,8 +168,9 @@ func (s *PostgresStore) ListFlags(ctx context.Context, limit, offset int) ([]*Fl
 	// 1. Get Total Count (for pagination metadata)
 	// We prioritize a separate count query over window functions (COUNT(*) OVER())
 	// for simplicity and predictable performance in this specific use case.
+	// Only count non-deleted flags.
 	var total int64
-	countQuery := `SELECT count(*) FROM flags`
+	countQuery := `SELECT count(*) FROM flags WHERE is_deleted = FALSE`
 
 	if err := s.db.QueryRow(ctx, countQuery).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("failed to count flags: %w", err)
@@ -158,10 +181,11 @@ func (s *PostgresStore) ListFlags(ctx context.Context, limit, offset int) ([]*Fl
 		return []*Flag{}, 0, nil
 	}
 
-	// 2. Get Data
+	// 2. Get Data (only non-deleted flags)
 	query := `
-		SELECT id, key, name, description, enabled, default_value, rules, version, created_at, updated_at
+		SELECT id, key, name, description, enabled, default_value, rules, version, is_deleted, created_at, updated_at
 		FROM flags
+		WHERE is_deleted = FALSE
 		ORDER BY id DESC
 		LIMIT $1 OFFSET $2
 	`
@@ -187,6 +211,7 @@ func (s *PostgresStore) ListFlags(ctx context.Context, limit, offset int) ([]*Fl
 			&f.DefaultValue,
 			&f.Rules,
 			&f.Version,
+			&f.IsDeleted,
 			&f.CreatedAt,
 			&f.UpdatedAt,
 		); err != nil {
@@ -207,13 +232,14 @@ func (s *PostgresStore) ListFlags(ctx context.Context, limit, offset int) ([]*Fl
 	return flags, total, nil
 }
 
-// ListAllFlags retrieves all flags ordered by ID.
+// ListAllFlags retrieves all non-deleted flags ordered by ID.
 // Warning: In a massive production DB, this should be batched.
 // For the V1 "Walking Skeleton", fetching all is acceptable.
 func (s *PostgresStore) ListAllFlags(ctx context.Context) ([]*Flag, error) {
 	query := `
-		SELECT id, key, name, description, enabled, default_value, rules, version, created_at, updated_at
+		SELECT id, key, name, description, enabled, default_value, rules, version, is_deleted, created_at, updated_at
 		FROM flags
+		WHERE is_deleted = FALSE
 		ORDER BY id ASC
 	`
 
@@ -235,6 +261,7 @@ func (s *PostgresStore) ListAllFlags(ctx context.Context) ([]*Flag, error) {
 			&f.DefaultValue,
 			&f.Rules,
 			&f.Version,
+			&f.IsDeleted,
 			&f.CreatedAt,
 			&f.UpdatedAt,
 		); err != nil {
@@ -255,12 +282,12 @@ func (s *PostgresStore) ListAllFlags(ctx context.Context) ([]*Flag, error) {
 	return flags, nil
 }
 
-// GetFlagByKey retrieves a single flag by its unique key.
+// GetFlagByKey retrieves a single non-deleted flag by its unique key.
 func (s *PostgresStore) GetFlagByKey(ctx context.Context, key string) (*Flag, error) {
 	query := `
-		SELECT id, key, name, description, enabled, default_value, rules, version, created_at, updated_at
+		SELECT id, key, name, description, enabled, default_value, rules, version, is_deleted, created_at, updated_at
 		FROM flags
-		WHERE key = $1
+		WHERE key = $1 AND is_deleted = FALSE
 	`
 
 	var f Flag
@@ -273,6 +300,47 @@ func (s *PostgresStore) GetFlagByKey(ctx context.Context, key string) (*Flag, er
 		&f.DefaultValue,
 		&f.Rules,
 		&f.Version,
+		&f.IsDeleted,
+		&f.CreatedAt,
+		&f.UpdatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("flag not found: %w", err)
+		}
+		return nil, fmt.Errorf("failed to get flag: %w", err)
+	}
+
+	if len(f.Rules) == 0 {
+		f.Rules = []ruleengine.Rule{}
+	}
+
+	return &f, nil
+}
+
+// GetFlagByKeyIncludingDeleted retrieves a flag by its unique key, including soft-deleted flags.
+// This is used by the syncer to distinguish between "never existed" and "soft-deleted".
+func (s *PostgresStore) GetFlagByKeyIncludingDeleted(ctx context.Context, key string) (*Flag, error) {
+	query := `
+		SELECT id, key, name, description, enabled, default_value, rules, version, is_deleted, created_at, updated_at
+		FROM flags
+		WHERE key = $1
+		ORDER BY version DESC
+		LIMIT 1
+	`
+
+	var f Flag
+	err := s.db.QueryRow(ctx, query, key).Scan(
+		&f.ID,
+		&f.Key,
+		&f.Name,
+		&f.Description,
+		&f.Enabled,
+		&f.DefaultValue,
+		&f.Rules,
+		&f.Version,
+		&f.IsDeleted,
 		&f.CreatedAt,
 		&f.UpdatedAt,
 	)
@@ -297,7 +365,7 @@ func (s *PostgresStore) GetFlagByKey(ctx context.Context, key string) (*Flag, er
 func (s *PostgresStore) UpdateFlag(ctx context.Context, params *UpdateFlagParams) (*Flag, error) {
 	// Build dynamic SQL query based on provided fields
 	setClauses := []string{}
-	args := []interface{}{}
+	args := []any{}
 	argCounter := 1
 
 	if params.Name != nil {
@@ -338,60 +406,165 @@ func (s *PostgresStore) UpdateFlag(ctx context.Context, params *UpdateFlagParams
 	setClauses = append(setClauses, "version = version + 1")
 	setClauses = append(setClauses, "updated_at = NOW()")
 
-	// Build the final query
+	// Single atomic query that distinguishes between not found and version conflict.
+	// Uses a CTE with FULL OUTER JOIN to always return a result, even when UPDATE fails.
+	// This allows us to determine the exact failure reason without a second query.
 	query := fmt.Sprintf(`
-		UPDATE flags
-		SET %s
-		WHERE key = $%d AND version = $%d
-		RETURNING id, key, name, description, enabled, default_value, rules, version, created_at, updated_at
-	`, strings.Join(setClauses, ", "), argCounter, argCounter+1)
+		WITH flag_check AS (
+			SELECT version, is_deleted
+			FROM flags
+			WHERE key = $%d
+		),
+		updated AS (
+			UPDATE flags
+			SET %s
+			WHERE key = $%d AND version = $%d AND is_deleted = FALSE
+			RETURNING id, key, name, description, enabled, default_value, rules, version, is_deleted, created_at, updated_at
+		)
+		SELECT 
+			u.id, u.key, u.name, u.description, u.enabled, u.default_value, u.rules, u.version, u.is_deleted, u.created_at, u.updated_at,
+			fc.version as existing_version,
+			fc.is_deleted as existing_is_deleted
+		FROM flag_check fc
+		FULL OUTER JOIN updated u ON true
+	`, argCounter, strings.Join(setClauses, ", "), argCounter, argCounter+1)
 
 	// Add WHERE clause parameters
 	args = append(args, params.Key, params.Version)
 
 	// Execute the update
-	var f Flag
+	// Use pointers for all update fields since they may be NULL if the UPDATE didn't match any rows
+	var updateID *int64
+	var updateKey *string
+	var updateName *string
+	var updateDescription *string
+	var updateEnabled *bool
+	var updateDefaultValue *bool
+	var updateRules *[]ruleengine.Rule
+	var updateVersion *int64
+	var updateIsDeleted *bool
+	var updateCreatedAt *time.Time
+	var updateUpdatedAt *time.Time
+	var existingVersion *int64
+	var existingIsDeleted *bool
+
 	err := s.db.QueryRow(ctx, query, args...).Scan(
-		&f.ID,
-		&f.Key,
-		&f.Name,
-		&f.Description,
-		&f.Enabled,
-		&f.DefaultValue,
-		&f.Rules,
-		&f.Version,
-		&f.CreatedAt,
-		&f.UpdatedAt,
+		&updateID,
+		&updateKey,
+		&updateName,
+		&updateDescription,
+		&updateEnabled,
+		&updateDefaultValue,
+		&updateRules,
+		&updateVersion,
+		&updateIsDeleted,
+		&updateCreatedAt,
+		&updateUpdatedAt,
+		&existingVersion,
+		&existingIsDeleted,
 	)
 
+	if err == pgx.ErrNoRows {
+		// No rows means flag doesn't exist at all
+		return nil, fmt.Errorf("flag not found")
+	}
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, fmt.Errorf("version conflict or flag not found")
-		}
 		return nil, fmt.Errorf("failed to update flag: %w", err)
+	}
+
+	// Check if update succeeded (updateID will be non-nil if UPDATE returned a row)
+	if updateID == nil {
+		// Update failed - determine why based on the flag_check CTE result
+		if existingVersion == nil {
+			// Flag doesn't exist at all
+			return nil, fmt.Errorf("flag not found")
+		}
+		if existingIsDeleted != nil && *existingIsDeleted {
+			// Flag exists but is soft-deleted
+			return nil, fmt.Errorf("flag not found")
+		}
+		// Flag exists and is not deleted, so must be version mismatch
+		return nil, fmt.Errorf("version conflict")
+	}
+
+	// Build the result flag
+	f := &Flag{
+		ID:           *updateID,
+		Key:          *updateKey,
+		Name:         *updateName,
+		Description:  *updateDescription,
+		Enabled:      *updateEnabled,
+		DefaultValue: *updateDefaultValue,
+		Rules:        *updateRules,
+		Version:      *updateVersion,
+		IsDeleted:    *updateIsDeleted,
+		CreatedAt:    *updateCreatedAt,
+		UpdatedAt:    *updateUpdatedAt,
 	}
 
 	if len(f.Rules) == 0 {
 		f.Rules = []ruleengine.Rule{}
 	}
 
-	return &f, nil
+	return f, nil
 }
 
-// DeleteFlag permanently removes a flag from the database.
-// It returns an error if the flag doesn't exist.
-func (s *PostgresStore) DeleteFlag(ctx context.Context, key string) error {
-	query := `DELETE FROM flags WHERE key = $1`
+// DeleteFlag performs a soft delete on a flag by setting is_deleted = TRUE.
+// This allows the same key to be reused in the future while preserving history.
+// Uses optimistic locking to prevent concurrent deletion conflicts.
+// Increments the version on delete and returns the new version for cache updates.
+// Returns distinct errors for not found vs version mismatch (single atomic query).
+func (s *PostgresStore) DeleteFlag(ctx context.Context, key string, version int64) (int64, error) {
+	// Single atomic query that distinguishes between not found and version conflict.
+	// Uses a CTE with FULL OUTER JOIN to always return a result.
+	query := `
+		WITH flag_check AS (
+			SELECT version, is_deleted
+			FROM flags
+			WHERE key = $1
+		),
+		deleted AS (
+			UPDATE flags
+			SET is_deleted = TRUE, version = version + 1, updated_at = NOW()
+			WHERE key = $1 AND version = $2 AND is_deleted = FALSE
+			RETURNING id, version
+		)
+		SELECT 
+			d.id as deleted_id,
+			d.version as new_version,
+			fc.version as existing_version,
+			fc.is_deleted as existing_is_deleted
+		FROM flag_check fc
+		FULL OUTER JOIN deleted d ON true
+	`
 
-	result, err := s.db.Exec(ctx, query, key)
+	var deletedID *int64
+	var newVersion *int64
+	var existingVersion *int64
+	var existingIsDeleted *bool
+	err := s.db.QueryRow(ctx, query, key, version).Scan(&deletedID, &newVersion, &existingVersion, &existingIsDeleted)
+	if err == pgx.ErrNoRows {
+		// No rows means flag doesn't exist at all
+		return 0, fmt.Errorf("flag not found")
+	}
 	if err != nil {
-		return fmt.Errorf("failed to delete flag: %w", err)
+		return 0, fmt.Errorf("failed to delete flag: %w", err)
 	}
 
-	// Check if any rows were affected
-	if result.RowsAffected() == 0 {
-		return fmt.Errorf("flag not found")
+	// Check if delete succeeded (deletedID will be non-nil if UPDATE returned a row)
+	if deletedID == nil {
+		// Delete failed - determine why based on the flag_check CTE result
+		if existingVersion == nil {
+			// Flag doesn't exist at all
+			return 0, fmt.Errorf("flag not found")
+		}
+		if existingIsDeleted != nil && *existingIsDeleted {
+			// Flag exists but is already soft-deleted
+			return 0, fmt.Errorf("flag not found")
+		}
+		// Flag exists and is not deleted, so must be version mismatch
+		return 0, fmt.Errorf("version conflict")
 	}
 
-	return nil
+	return *newVersion, nil
 }
