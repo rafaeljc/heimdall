@@ -104,7 +104,7 @@ func (a *API) handleCreateFlag(w http.ResponseWriter, r *http.Request) {
 	resp := mapStoreFlagToResponse(flag)
 
 	// 6. Async Notification
-	a.notifyCacheAsync(log, flag.Key)
+	a.notifyCacheAsync(log, flag.Key, flag.Version)
 
 	// 7. Set Response Headers
 	setETagHeaders(w, flag.Version)
@@ -281,7 +281,7 @@ func (a *API) handleDeleteFlag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 3. Call Repository (version checking is done atomically in the DB)
-	_, err := a.flags.DeleteFlag(r.Context(), key, version)
+	newVersion, err := a.flags.DeleteFlag(r.Context(), key, version)
 	if err != nil {
 		// Check for known business errors (not found, version conflict)
 		if handleStoreError(w, r, err, key) {
@@ -299,7 +299,7 @@ func (a *API) handleDeleteFlag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 4. Async Notification
-	a.notifyCacheAsync(log, key)
+	a.notifyCacheAsync(log, key, newVersion)
 
 	// 5. Return Success (204 No Content)
 	log.Info("flag deleted successfully", slog.String("flag_key", key))
@@ -394,7 +394,7 @@ func (a *API) handleUpdateFlag(w http.ResponseWriter, r *http.Request) {
 	setETagHeaders(w, updatedFlag.Version)
 
 	// 9. Async Notification
-	a.notifyCacheAsync(log, key)
+	a.notifyCacheAsync(log, key, updatedFlag.Version)
 
 	// 10. Return Success
 	log.Info("flag updated successfully", slog.String("flag_key", key), slog.Int64("new_version", updatedFlag.Version))
@@ -504,8 +504,8 @@ func mapStoreFlagToResponse(f *store.Flag) Flag {
 }
 
 // notifyCacheAsync try to notify the cache asynchronously about a flag update.
-func (a *API) notifyCacheAsync(log *slog.Logger, flagKey string) {
-	go func(key string) {
+func (a *API) notifyCacheAsync(log *slog.Logger, flagKey string, version int64) {
+	go func(key string, ver int64) {
 		// Create a context disconnected from the HTTP request.
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
@@ -514,7 +514,7 @@ func (a *API) notifyCacheAsync(log *slog.Logger, flagKey string) {
 		baseDelay := 100 * time.Millisecond
 
 		for i := 0; i <= maxRetries; i++ {
-			err := a.cache.PublishUpdate(ctx, key)
+			err := a.cache.PublishUpdate(ctx, key, ver)
 			if err == nil {
 				return
 			}
@@ -522,6 +522,7 @@ func (a *API) notifyCacheAsync(log *slog.Logger, flagKey string) {
 			if i == maxRetries {
 				log.Error("CRITICAL: failed to push update event after retries",
 					slog.String("key", key),
+					slog.Int64("version", ver),
 					slog.String("error", err.Error()))
 				return
 			}
@@ -534,5 +535,5 @@ func (a *API) notifyCacheAsync(log *slog.Logger, flagKey string) {
 
 			time.Sleep(baseDelay * time.Duration(1<<i))
 		}
-	}(flagKey)
+	}(flagKey, version)
 }
