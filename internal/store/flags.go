@@ -80,6 +80,10 @@ type FlagRepository interface {
 	// GetFlagByKey retrieves a flag by its unique key.
 	GetFlagByKey(ctx context.Context, key string) (*Flag, error)
 
+	// GetFlagByKeyIncludingDeleted retrieves a flag by its unique key, including soft-deleted flags.
+	// Used by the syncer to determine if a flag was soft-deleted (for tombstone creation).
+	GetFlagByKeyIncludingDeleted(ctx context.Context, key string) (*Flag, error)
+
 	// UpdateFlag performs a partial update with optimistic locking.
 	// Returns the updated flag or an error if version mismatch or flag not found.
 	UpdateFlag(ctx context.Context, params *UpdateFlagParams) (*Flag, error)
@@ -284,6 +288,46 @@ func (s *PostgresStore) GetFlagByKey(ctx context.Context, key string) (*Flag, er
 		SELECT id, key, name, description, enabled, default_value, rules, version, is_deleted, created_at, updated_at
 		FROM flags
 		WHERE key = $1 AND is_deleted = FALSE
+	`
+
+	var f Flag
+	err := s.db.QueryRow(ctx, query, key).Scan(
+		&f.ID,
+		&f.Key,
+		&f.Name,
+		&f.Description,
+		&f.Enabled,
+		&f.DefaultValue,
+		&f.Rules,
+		&f.Version,
+		&f.IsDeleted,
+		&f.CreatedAt,
+		&f.UpdatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("flag not found: %w", err)
+		}
+		return nil, fmt.Errorf("failed to get flag: %w", err)
+	}
+
+	if len(f.Rules) == 0 {
+		f.Rules = []ruleengine.Rule{}
+	}
+
+	return &f, nil
+}
+
+// GetFlagByKeyIncludingDeleted retrieves a flag by its unique key, including soft-deleted flags.
+// This is used by the syncer to distinguish between "never existed" and "soft-deleted".
+func (s *PostgresStore) GetFlagByKeyIncludingDeleted(ctx context.Context, key string) (*Flag, error) {
+	query := `
+		SELECT id, key, name, description, enabled, default_value, rules, version, is_deleted, created_at, updated_at
+		FROM flags
+		WHERE key = $1
+		ORDER BY version DESC
+		LIMIT 1
 	`
 
 	var f Flag
