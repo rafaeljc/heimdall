@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/rafaeljc/heimdall/internal/cache"
 	"github.com/rafaeljc/heimdall/internal/controlapi"
 	"github.com/rafaeljc/heimdall/internal/store"
 	"github.com/rafaeljc/heimdall/internal/testsupport"
@@ -116,7 +117,7 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 		assert.JSONEq(t, "[]", string(resp.Rules), "Rules should be an empty JSON array []")
 
 		// Validate Side Effect (Redis Queue)
-		// We verify that the API actually pushed the key to the 'heimdall:queue:updates' list.
+		// We verify that the API actually pushed the message to the 'heimdall:queue:updates' list.
 		require.Eventually(t, func() bool {
 			// Check if list has items
 			length, err := verifierClient.LLen(ctx, "heimdall:queue:updates").Result()
@@ -124,12 +125,17 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 				return false
 			}
 
-			// Check if the item is indeed our key
-			// Note: In a real concurent test we might just check LPos or LRange,
-			// but for this isolated test, LPop is fine.
+			// Pop message and decode it (format: "flagKey:version")
 			val, err := verifierClient.LPop(ctx, "heimdall:queue:updates").Result()
-			return err == nil && val == key
-		}, 2*time.Second, 100*time.Millisecond, "Flag key must appear in Redis update queue")
+			if err != nil {
+				return false
+			}
+
+			// Verify message format using encode function
+			// For newly created flag, version is 1
+			expectedMessage := cache.EncodeQueueMessage(key, 1)
+			return val == expectedMessage
+		}, 2*time.Second, 100*time.Millisecond, "Flag key with version must appear in Redis update queue")
 	})
 
 	t.Run("POST /flags - Happy Path (Defaults Check)", func(t *testing.T) {
@@ -605,7 +611,7 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 		require.Equal(t, http.StatusNoContent, rr.Code)
 
 		// Assert: Side Effect - Cache event was published to Redis queue
-		// We verify that the API actually pushed the key to the 'heimdall:queue:updates' list.
+		// We verify that the API actually pushed the message to the 'heimdall:queue:updates' list.
 		require.Eventually(t, func() bool {
 			// Check if list has items
 			length, err := verifierClient.LLen(ctx, "heimdall:queue:updates").Result()
@@ -613,10 +619,18 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 				return false
 			}
 
-			// Check if the item is indeed our key
+			// Pop message and decode it (format: "flagKey:version")
+			// For soft delete, version is incremented (from 1 to 2)
 			val, err := verifierClient.LPop(ctx, "heimdall:queue:updates").Result()
-			return err == nil && val == key
-		}, 2*time.Second, 100*time.Millisecond, "Flag key must appear in Redis update queue")
+			if err != nil {
+				return false
+			}
+
+			// Verify message format using encode function
+			// Delete increments version to 2
+			expectedMessage := cache.EncodeQueueMessage(key, 2)
+			return val == expectedMessage
+		}, 2*time.Second, 100*time.Millisecond, "Flag key with version must appear in Redis update queue")
 	})
 
 	// -------------------------------------------------------------------------
@@ -822,10 +836,18 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 				return false
 			}
 
-			// Check if the item is indeed our key
+			// Pop message and decode it (format: "flagKey:version")
+			// For update, version is incremented from 1 to 2
 			val, err := verifierClient.LPop(ctx, "heimdall:queue:updates").Result()
-			return err == nil && val == key
-		}, 2*time.Second, 100*time.Millisecond, "Flag key must appear in Redis update queue")
+			if err != nil {
+				return false
+			}
+
+			// Verify message format using encode function
+			// Update increments version to 2
+			expectedMessage := cache.EncodeQueueMessage(key, 2)
+			return val == expectedMessage
+		}, 2*time.Second, 100*time.Millisecond, "Flag key with version must appear in Redis update queue")
 	})
 }
 
