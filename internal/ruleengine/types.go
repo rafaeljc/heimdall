@@ -78,4 +78,8 @@ type FeatureFlag struct {
 	// Version is the monotonic counter for optimistic locking.
 	// It ensures that older updates do not overwrite newer ones in Redis.
 	Version int64 `json:"version"`
+
+	// IsDeleted indicates if the flag has been soft-deleted.
+	// Used for tombstone entries in Redis cache.
+	IsDeleted bool `json:"is_deleted,omitempty"`
 }
