@@ -60,7 +60,7 @@ This repository follows the **Standard Go Project Layout** and manages multiple 
 
 ### Prerequisites
 
-* [Go 1.23+](https://go.dev/)
+* [Go 1.24+](https://go.dev/)
 * [Docker](https://www.docker.com/) & Docker Compose
 * [Task](https://taskfile.dev/)
 

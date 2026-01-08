@@ -150,6 +150,6 @@ tasks:
 
   # --- DEPENDENCY MANAGEMENT (tidy:*) ---
   tidy:deps:
-    desc: Runs go mod tidy forcing Go 1.23 compatibility
+    desc: Runs go mod tidy forcing Go 1.24 compatibility
     cmds:
-      - go mod tidy -go=1.23.0
+      - go mod tidy -go=1.24.0
