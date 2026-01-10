@@ -66,14 +66,16 @@ export HEIMDALL_SERVER_CONTROL_TLS_KEY_FILE=/certs/tls.key
 
 ### Data Plane (gRPC API)
 
-| Variable | Default |
-|----------|---------|
-| `HEIMDALL_SERVER_DATA_PORT` | `50051` |
-| `HEIMDALL_SERVER_DATA_HOST` | `0.0.0.0` |
-| `HEIMDALL_SERVER_DATA_MAX_CONCURRENT_STREAMS` | `100` |
-| `HEIMDALL_SERVER_DATA_KEEPALIVE_TIME` | `120s` |
-| `HEIMDALL_SERVER_DATA_KEEPALIVE_TIMEOUT` | `20s` |
-| `HEIMDALL_SERVER_DATA_MAX_CONNECTION_AGE` | `300s` |
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `HEIMDALL_SERVER_DATA_PORT` | `50051` | - |
+| `HEIMDALL_SERVER_DATA_HOST` | `0.0.0.0` | - |
+| `HEIMDALL_SERVER_DATA_MAX_CONCURRENT_STREAMS` | `100` | - |
+| `HEIMDALL_SERVER_DATA_KEEPALIVE_TIME` | `120s` | - |
+| `HEIMDALL_SERVER_DATA_KEEPALIVE_TIMEOUT` | `20s` | - |
+| `HEIMDALL_SERVER_DATA_MAX_CONNECTION_AGE` | `300s` | - |
+| `HEIMDALL_SERVER_DATA_L1_CACHE_CAPACITY` | `10000` | In-memory cache size, ≥1000 in production |
+| `HEIMDALL_SERVER_DATA_L1_CACHE_TTL` | `60s` | In-memory cache TTL, ≥10s in production |
 
 ### Database
 
@@ -141,3 +143,5 @@ When `HEIMDALL_APP_ENV=production`:
 - Redis TLS: enabled
 - Control plane API key hash: required
 - Control plane TLS: enabled
+- Data plane L1 cache capacity: ≥1000
+- Data plane L1 cache TTL: ≥10s

@@ -92,7 +92,7 @@ func (c *Config) Validate() error {
 		return err
 	}
 
-	if err := c.Server.Data.Validate(); err != nil {
+	if err := c.Server.Data.Validate(c.App.Environment); err != nil {
 		return err
 	}
 

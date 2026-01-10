@@ -103,6 +103,8 @@ func TestDataPlaneConfig_Validation(t *testing.T) {
 				assert.Equal(t, 120*time.Second, cfg.Server.Data.KeepaliveTime)
 				assert.Equal(t, 20*time.Second, cfg.Server.Data.KeepaliveTimeout)
 				assert.Equal(t, 300*time.Second, cfg.Server.Data.MaxConnectionAge)
+				assert.Equal(t, 10000, cfg.Server.Data.L1CacheCapacity)
+				assert.Equal(t, 60*time.Second, cfg.Server.Data.L1CacheTTL)
 			},
 			wantErr: false,
 		},
@@ -119,6 +121,124 @@ func TestDataPlaneConfig_Validation(t *testing.T) {
 				assert.Equal(t, 60*time.Second, cfg.Server.Data.KeepaliveTime)
 				assert.Equal(t, 10*time.Second, cfg.Server.Data.KeepaliveTimeout)
 				assert.Equal(t, 600*time.Second, cfg.Server.Data.MaxConnectionAge)
+			},
+			wantErr: false,
+		},
+		// L1 Cache Configuration Tests
+		{
+			name: "Should pass validation with custom L1 cache capacity in development",
+			envVars: mergeEnvVars(map[string]string{
+				"HEIMDALL_SERVER_DATA_L1_CACHE_CAPACITY": "5000",
+			}),
+			want: func(t *testing.T, cfg *Config) {
+				assert.Equal(t, 5000, cfg.Server.Data.L1CacheCapacity)
+			},
+			wantErr: false,
+		},
+		{
+			name: "Should pass validation with custom L1 cache TTL in development",
+			envVars: mergeEnvVars(map[string]string{
+				"HEIMDALL_SERVER_DATA_L1_CACHE_TTL": "30s",
+			}),
+			want: func(t *testing.T, cfg *Config) {
+				assert.Equal(t, 30*time.Second, cfg.Server.Data.L1CacheTTL)
+			},
+			wantErr: false,
+		},
+		{
+			name: "Should pass validation with minimum L1 cache values in development",
+			envVars: mergeEnvVars(map[string]string{
+				"HEIMDALL_SERVER_DATA_L1_CACHE_CAPACITY": "1",
+				"HEIMDALL_SERVER_DATA_L1_CACHE_TTL":      "1s",
+			}),
+			want: func(t *testing.T, cfg *Config) {
+				assert.Equal(t, 1, cfg.Server.Data.L1CacheCapacity)
+				assert.Equal(t, 1*time.Second, cfg.Server.Data.L1CacheTTL)
+			},
+			wantErr: false,
+		},
+		{
+			name: "Should fail validation with zero L1 cache capacity",
+			envVars: mergeEnvVars(map[string]string{
+				"HEIMDALL_SERVER_DATA_L1_CACHE_CAPACITY": "0",
+			}),
+			wantErr: true,
+		},
+		{
+			name: "Should fail validation with negative L1 cache capacity",
+			envVars: mergeEnvVars(map[string]string{
+				"HEIMDALL_SERVER_DATA_L1_CACHE_CAPACITY": "-100",
+			}),
+			wantErr: true,
+		},
+		{
+			name: "Should fail validation with zero L1 cache TTL",
+			envVars: mergeEnvVars(map[string]string{
+				"HEIMDALL_SERVER_DATA_L1_CACHE_TTL": "0",
+			}),
+			wantErr: true,
+		},
+		{
+			name: "Should fail validation with negative L1 cache TTL",
+			envVars: mergeEnvVars(map[string]string{
+				"HEIMDALL_SERVER_DATA_L1_CACHE_TTL": "-5s",
+			}),
+			wantErr: true,
+		},
+		{
+			name: "Should fail validation with invalid L1 cache capacity format",
+			envVars: mergeEnvVars(map[string]string{
+				"HEIMDALL_SERVER_DATA_L1_CACHE_CAPACITY": "abc",
+			}),
+			wantErr: true,
+		},
+		{
+			name: "Should fail validation with invalid L1 cache TTL format",
+			envVars: mergeEnvVars(map[string]string{
+				"HEIMDALL_SERVER_DATA_L1_CACHE_TTL": "invalid",
+			}),
+			wantErr: true,
+		},
+		// Production-specific L1 Cache Tests
+		{
+			name: "Should fail validation with L1 cache capacity below 1000 in production",
+			envVars: func() map[string]string {
+				cfg := validProductionConfig()
+				cfg["HEIMDALL_SERVER_DATA_L1_CACHE_CAPACITY"] = "999"
+				return cfg
+			}(),
+			wantErr: true,
+		},
+		{
+			name: "Should pass validation with L1 cache capacity exactly 1000 in production",
+			envVars: func() map[string]string {
+				cfg := validProductionConfig()
+				cfg["HEIMDALL_SERVER_DATA_L1_CACHE_CAPACITY"] = "1000"
+				return cfg
+			}(),
+			want: func(t *testing.T, cfg *Config) {
+				assert.Equal(t, 1000, cfg.Server.Data.L1CacheCapacity)
+			},
+			wantErr: false,
+		},
+		{
+			name: "Should fail validation with L1 cache TTL below 10s in production",
+			envVars: func() map[string]string {
+				cfg := validProductionConfig()
+				cfg["HEIMDALL_SERVER_DATA_L1_CACHE_TTL"] = "9s"
+				return cfg
+			}(),
+			wantErr: true,
+		},
+		{
+			name: "Should pass validation with L1 cache TTL exactly 10s in production",
+			envVars: func() map[string]string {
+				cfg := validProductionConfig()
+				cfg["HEIMDALL_SERVER_DATA_L1_CACHE_TTL"] = "10s"
+				return cfg
+			}(),
+			want: func(t *testing.T, cfg *Config) {
+				assert.Equal(t, 10*time.Second, cfg.Server.Data.L1CacheTTL)
 			},
 			wantErr: false,
 		},
