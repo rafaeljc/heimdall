@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/rafaeljc/heimdall/internal/cache"
+	"github.com/rafaeljc/heimdall/internal/config"
 	"github.com/rafaeljc/heimdall/internal/controlapi"
 	"github.com/rafaeljc/heimdall/internal/database"
 	"github.com/rafaeljc/heimdall/internal/logger"
@@ -66,33 +67,25 @@ func run() error {
 	// -------------------------------------------------------------------------
 	// 1. Configuration
 	// -------------------------------------------------------------------------
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		return fmt.Errorf("DATABASE_URL environment variable is required")
-	}
-	redisURL := os.Getenv("REDIS_URL")
-	if redisURL == "" {
-		return fmt.Errorf("REDIS_URL environment variable is required")
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	// API Key Authentication
-	apiKeyHash := os.Getenv("API_KEY_HASH")
-	if apiKeyHash == "" {
-		return fmt.Errorf("API_KEY_HASH environment variable is required")
-	}
+	apiKeyHash := cfg.Server.Control.APIKeyHash
 
 	// Create a background context for the initialization phase
 	ctx := context.Background()
 
 	// Initialize the DB Pool.
-	pgPool, err := database.NewPostgresPool(ctx, dbURL)
+	pgPool, err := database.NewPostgresPool(ctx, cfg.Database.ConnectionString())
 	if err != nil {
 		return fmt.Errorf("could not connect to database: %w", err)
 	}
 	defer pgPool.Close()
 
 	// Initialize Redis Client
-	redisCache, err := cache.NewRedisCache(ctx, redisURL)
+	redisCache, err := cache.NewRedisCache(ctx, &cfg.Redis)
 	if err != nil {
 		return fmt.Errorf("failed to connect to redis: %w", err)
 	}

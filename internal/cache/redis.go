@@ -5,6 +5,7 @@ package cache
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/rafaeljc/heimdall/internal/config"
 	"github.com/rafaeljc/heimdall/internal/ruleengine"
 )
 
@@ -117,21 +119,32 @@ type RedisCache struct {
 	script *redis.Script
 }
 
-// NewRedisCache initializes a new Redis client.
-func NewRedisCache(ctx context.Context, addr string) (*RedisCache, error) {
-	if addr == "" {
-		return nil, fmt.Errorf("redis address cannot be empty")
+// NewRedisCache initializes a new Redis client using the provided configuration.
+func NewRedisCache(ctx context.Context, cfg *config.RedisConfig) (*RedisCache, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("redis config cannot be nil")
 	}
 
 	opts := &redis.Options{
-		Addr: addr,
-		// Timeouts prevent cascading failures
-		DialTimeout:  5 * time.Second,
-		ReadTimeout:  30 * time.Second, // Should be longer than BLMOVE timeout
-		WriteTimeout: 3 * time.Second,
-		// Connection Pool settings
-		PoolSize:     50, // High pool size for Data Plane throughput
-		MinIdleConns: 10,
+		Addr:            cfg.Address(),
+		Password:        cfg.Password,
+		DB:              cfg.DB,
+		DialTimeout:     cfg.DialTimeout,
+		ReadTimeout:     cfg.ReadTimeout,
+		WriteTimeout:    cfg.WriteTimeout,
+		PoolSize:        cfg.PoolSize,
+		MinIdleConns:    cfg.MinIdleConns,
+		PoolTimeout:     cfg.PoolTimeout,
+		MaxRetries:      cfg.MaxRetries,
+		MinRetryBackoff: cfg.MinRetryBackoff,
+		MaxRetryBackoff: cfg.MaxRetryBackoff,
+	}
+
+	// Configure TLS if enabled
+	if cfg.TLSEnabled {
+		opts.TLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
 	}
 
 	client := redis.NewClient(opts)

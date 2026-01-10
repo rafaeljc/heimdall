@@ -3,8 +3,10 @@ package testsupport
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/rafaeljc/heimdall/internal/cache"
+	"github.com/rafaeljc/heimdall/internal/config"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/redis"
 )
@@ -40,8 +42,17 @@ func StartRedisContainer(ctx context.Context) (*RedisContainer, error) {
 		return nil, fmt.Errorf("failed to get redis endpoint: %w", err)
 	}
 
-	// 3. Initialize Application Cache Client
-	cacheClient, err := cache.NewRedisCache(ctx, endpoint)
+	// 3. Initialize Application Cache Client with test config
+	// Parse host:port from endpoint (e.g., "localhost:54321")
+	host, port, _ := strings.Cut(endpoint, ":")
+
+	testCfg := &config.RedisConfig{
+		Host:     host,
+		Port:     port,
+		Password: "",
+		DB:       0,
+	}
+	cacheClient, err := cache.NewRedisCache(ctx, testCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create redis client: %w", err)
 	}

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/rafaeljc/heimdall/internal/cache"
+	"github.com/rafaeljc/heimdall/internal/config"
 	"github.com/rafaeljc/heimdall/internal/dataapi"
 	"github.com/rafaeljc/heimdall/internal/ruleengine"
 	"github.com/rafaeljc/heimdall/internal/testsupport"
@@ -49,14 +51,27 @@ func setupEnv(t *testing.T) (pb.DataPlaneClient, cache.Service, func()) {
 	// Redis Cache (L2)
 	endpoint, err := redisContainer.Container.PortEndpoint(ctx, "6379/tcp", "")
 	require.NoError(t, err)
-	l2, err := cache.NewRedisCache(ctx, endpoint)
+
+	// Parse endpoint into host:port for config
+	host, port, _ := strings.Cut(endpoint, ":")
+	redisConfig := &config.RedisConfig{
+		Host: host,
+		Port: port,
+	}
+	l2, err := cache.NewRedisCache(ctx, redisConfig)
 	require.NoError(t, err)
 
 	// Rule Engine (Stateless)
 	engine := ruleengine.New(log)
 
+	// Data Plane Config for API
+	dataConfig := &config.DataPlaneConfig{
+		L1CacheCapacity: 1000,
+		L1CacheTTL:      30 * time.Second,
+	}
+
 	// API Server (System Under Test)
-	api, err := dataapi.NewAPI(log, l2, engine)
+	api, err := dataapi.NewAPI(dataConfig, log, l2, engine)
 	require.NoError(t, err)
 
 	// 4. In-Memory Networking (bufconn)

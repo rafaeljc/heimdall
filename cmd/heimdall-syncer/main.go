@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rafaeljc/heimdall/internal/cache"
+	"github.com/rafaeljc/heimdall/internal/config"
 	"github.com/rafaeljc/heimdall/internal/database"
 	"github.com/rafaeljc/heimdall/internal/logger"
 	"github.com/rafaeljc/heimdall/internal/store"
@@ -46,13 +47,9 @@ func run() error {
 	// -------------------------------------------------------------------------
 	// 1. Configuration
 	// -------------------------------------------------------------------------
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		return fmt.Errorf("DATABASE_URL environment variable is required")
-	}
-	redisURL := os.Getenv("REDIS_URL")
-	if redisURL == "" {
-		return fmt.Errorf("REDIS_URL environment variable is required")
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
 	// Create a background context that we can cancel on shutdown
@@ -64,14 +61,14 @@ func run() error {
 	// -------------------------------------------------------------------------
 
 	// Initialize Postgres Pool
-	pgPool, err := database.NewPostgresPool(ctx, dbURL)
+	pgPool, err := database.NewPostgresPool(ctx, cfg.Database.ConnectionString())
 	if err != nil {
 		return fmt.Errorf("failed to connect to postgres: %w", err)
 	}
 	defer pgPool.Close()
 
 	// Initialize Redis Client
-	redisCache, err := cache.NewRedisCache(ctx, redisURL)
+	redisCache, err := cache.NewRedisCache(ctx, &cfg.Redis)
 	if err != nil {
 		return fmt.Errorf("failed to connect to redis: %w", err)
 	}

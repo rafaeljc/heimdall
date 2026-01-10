@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"time"
 
 	"github.com/rafaeljc/heimdall/internal/cache"
+	"github.com/rafaeljc/heimdall/internal/config"
 	"github.com/rafaeljc/heimdall/internal/logger"
 	"github.com/rafaeljc/heimdall/internal/ruleengine"
 	pb "github.com/rafaeljc/heimdall/proto/heimdall/v1"
@@ -41,15 +41,16 @@ type API struct {
 }
 
 // NewAPI creates a new Data Plane gRPC API instance.
-func NewAPI(log *slog.Logger, l2 cache.Service, engine *ruleengine.Engine) (*API, error) {
+func NewAPI(cfg *config.DataPlaneConfig, log *slog.Logger, l2 cache.Service, engine *ruleengine.Engine) (*API, error) {
+	if cfg == nil {
+		panic("dataapi: config cannot be nil")
+	}
 	if l2 == nil {
 		panic("dataapi: cache service cannot be nil")
 	}
 
-	// Initialize L1 Cache (Otter)
-	// Capacity: 10,000 itens (Hard Cap protection against OOM)
-	// TTL: 60s (Safety net for eventual consistency if Pub/Sub fails)
-	l1, err := cache.NewMemoryCache(10_000, 60*time.Second)
+	// Initialize L1 Cache (Otter) using configuration
+	l1, err := cache.NewMemoryCache(cfg.L1CacheCapacity, cfg.L1CacheTTL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize l1 cache: %w", err)
 	}

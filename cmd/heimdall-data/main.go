@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	"github.com/rafaeljc/heimdall/internal/cache"
+	"github.com/rafaeljc/heimdall/internal/config"
 	"github.com/rafaeljc/heimdall/internal/dataapi"
 	"github.com/rafaeljc/heimdall/internal/logger"
 	"github.com/rafaeljc/heimdall/internal/ruleengine"
@@ -63,9 +64,9 @@ func run() error {
 	// -------------------------------------------------------------------------
 	// 1. Configuration
 	// -------------------------------------------------------------------------
-	redisURL := os.Getenv("REDIS_URL")
-	if redisURL == "" {
-		return fmt.Errorf("REDIS_URL environment variable is required")
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
 	// Background context for initialization
@@ -79,7 +80,7 @@ func run() error {
 	engine := ruleengine.New(log)
 
 	// Initialize Redis Client (L2 Cache)
-	redisCache, err := cache.NewRedisCache(ctx, redisURL)
+	redisCache, err := cache.NewRedisCache(ctx, &cfg.Redis)
 	if err != nil {
 		return fmt.Errorf("failed to connect to redis: %w", err)
 	}
@@ -91,7 +92,7 @@ func run() error {
 	// -------------------------------------------------------------------------
 
 	// Initialize the gRPC API implementation
-	api, err := dataapi.NewAPI(log, redisCache, engine)
+	api, err := dataapi.NewAPI(&cfg.Server.Data, log, redisCache, engine)
 	if err != nil {
 		redisCache.Close()
 		return fmt.Errorf("failed to initialize data api: %w", err)
