@@ -26,16 +26,18 @@ func main() {
 }
 
 func run() error {
-	appName := "heimdall-syncer"
-	appEnv := os.Getenv("APP_ENV")
-	logLevel := os.Getenv("LOG_LEVEL")
+	// -------------------------------------------------------------------------
+	// 0. Configuration
+	// -------------------------------------------------------------------------
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
 
 	// -------------------------------------------------------------------------
-	// 0. Logger Setup
+	// 1. Logger Setup
 	// -------------------------------------------------------------------------
-	logCfg := logger.NewConfig(appName, appEnv, logLevel)
-
-	log := logger.New(logCfg)
+	log := logger.New(&cfg.App)
 
 	// Set Global Default
 	// Crucial so that 'slog.Info' calls within this file use the correct format
@@ -43,14 +45,6 @@ func run() error {
 	slog.SetDefault(log)
 
 	log.Info("starting service")
-
-	// -------------------------------------------------------------------------
-	// 1. Configuration
-	// -------------------------------------------------------------------------
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load configuration: %w", err)
-	}
 
 	// Create a background context that we can cancel on shutdown
 	ctx, cancel := context.WithCancel(context.Background())

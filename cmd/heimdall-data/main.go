@@ -35,20 +35,23 @@ func main() {
 
 // run executes the service lifecycle.
 func run() error {
-	appName := "heimdall-data-plane"
+	// -------------------------------------------------------------------------
+	// 0. Configuration
+	// -------------------------------------------------------------------------
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "50051"
 	}
-	appEnv := os.Getenv("APP_ENV")
-	logLevel := os.Getenv("LOG_LEVEL")
 
 	// -------------------------------------------------------------------------
-	// 0. Logger Setup
+	// 1. Logger Setup
 	// -------------------------------------------------------------------------
-	logCfg := logger.NewConfig(appName, appEnv, logLevel)
-
-	log := logger.New(logCfg)
+	log := logger.New(&cfg.App)
 
 	// Set Global Default.
 	// This ensures that:
@@ -58,16 +61,8 @@ func run() error {
 
 	log.Info("starting service",
 		slog.String("port", port),
-		slog.String("env", string(logCfg.Environment)),
+		slog.String("env", cfg.App.Environment),
 	)
-
-	// -------------------------------------------------------------------------
-	// 1. Configuration
-	// -------------------------------------------------------------------------
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load configuration: %w", err)
-	}
 
 	// Background context for initialization
 	ctx := context.Background()
@@ -126,7 +121,7 @@ func run() error {
 	// Enable Server Reflection.
 	// This allows tools like 'grpcurl' or Postman to inspect the API
 	// dynamically without needing the .proto file locally.
-	if logger.Environment(appEnv) != logger.EnvProd {
+	if cfg.App.Environment != config.EnvironmentProduction {
 		reflection.Register(grpcServer)
 		log.Info("grpc reflection enabled")
 	}

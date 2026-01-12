@@ -4,57 +4,46 @@
 package logger
 
 import (
+	"io"
 	"log/slog"
 	"os"
-	"strings"
+
+	"github.com/rafaeljc/heimdall/internal/config"
 )
-
-// Environment defines the runtime environment type.
-type Environment string
-
-const (
-	EnvDev  Environment = "dev"
-	EnvProd Environment = "prod"
-)
-
-// Config holds the configuration for the logger.
-type Config struct {
-	ServiceName string
-	Level       slog.Level
-	Environment Environment
-}
-
-// NewConfig creates a validated Config struct from raw strings.
-// It handles parsing, normalization, and default values.
-func NewConfig(serviceName, envStr, levelStr string) Config {
-	return Config{
-		ServiceName: serviceName,
-		Environment: parseEnv(envStr),
-		Level:       parseLevel(levelStr),
-	}
-}
 
 // New creates and returns a new *slog.Logger instance based on the provided config.
 // It implements the Factory Pattern, encapsulating handler creation and attribute injection.
-func New(cfg Config) *slog.Logger {
+// Output is written to os.Stdout.
+func New(cfg *config.AppConfig) *slog.Logger {
+	return NewWithWriter(cfg, os.Stdout)
+}
+
+// NewWithWriter creates and returns a new *slog.Logger instance based on the provided config,
+// writing output to the specified io.Writer. This is useful for testing or custom output destinations.
+func NewWithWriter(cfg *config.AppConfig, w io.Writer) *slog.Logger {
+	if cfg == nil {
+		panic("logger: config cannot be nil")
+	}
+
 	var handler slog.Handler
 
 	opts := &slog.HandlerOptions{
-		Level: cfg.Level,
+		Level: parseLevel(cfg.LogLevel),
 		// AddSource adds the file:line to the log (useful for debugging, expensive in prod)
-		AddSource: cfg.Environment == EnvDev,
+		AddSource: cfg.Environment != config.EnvironmentProduction,
 	}
 
-	// Choose handler based on environment
-	switch cfg.Environment {
-	case EnvDev:
+	// Choose handler based on log format from config
+	switch cfg.LogFormat {
+	case "text":
 		// TextHandler is human-readable: "time=... level=INFO msg=..."
-		handler = slog.NewTextHandler(os.Stdout, opts)
-	case EnvProd:
+		handler = slog.NewTextHandler(w, opts)
+	case "json":
 		// JSONHandler is machine-readable: {"time":"...","level":"INFO",...}
-		fallthrough
+		handler = slog.NewJSONHandler(w, opts)
 	default:
-		handler = slog.NewJSONHandler(os.Stdout, opts)
+		// Default to JSON for safety
+		handler = slog.NewJSONHandler(w, opts)
 	}
 
 	// Create the logger instance
@@ -63,8 +52,9 @@ func New(cfg Config) *slog.Logger {
 	// Inject global attributes (Identity & Metadata)
 	// These will appear in every log line emitted by this logger instance or its children.
 	logger = logger.With(
-		slog.String("service", cfg.ServiceName),
-		slog.String("env", string(cfg.Environment)),
+		slog.String("service", cfg.Name),
+		slog.String("version", cfg.Version),
+		slog.String("env", cfg.Environment),
 	)
 
 	return logger
@@ -78,14 +68,4 @@ func parseLevel(s string) slog.Level {
 		return slog.LevelInfo // Default safe value
 	}
 	return level
-}
-
-// parseEnv converts a string to our internal Environment type. Defaults to Prod.
-func parseEnv(s string) Environment {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "dev", "development":
-		return EnvDev
-	default:
-		return EnvProd // Default safe value
-	}
 }
