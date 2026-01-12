@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rafaeljc/heimdall/internal/cache"
+	"github.com/rafaeljc/heimdall/internal/config"
 	"github.com/rafaeljc/heimdall/internal/ruleengine"
 	"github.com/rafaeljc/heimdall/internal/store"
 	"github.com/rafaeljc/heimdall/internal/syncer"
@@ -119,11 +120,12 @@ func TestSyncerRaceCondition_Integration(t *testing.T) {
 		require.NoError(t, verifierClient.FlushAll(ctx).Err())
 
 		// Config (Aggressive)
-		cfg := syncer.Config{
-			PopTimeout:     50 * time.Millisecond,
-			HydrationCheck: 500 * time.Millisecond,
-			MaxRetries:     1,
-			BaseRetryDelay: 5 * time.Millisecond,
+		cfg := config.SyncerConfig{
+			PopTimeout:             50 * time.Millisecond,
+			HydrationCheckInterval: 500 * time.Millisecond,
+			MaxRetries:             1,
+			BaseRetryDelay:         5 * time.Millisecond,
+			HydrationConcurrency:   10,
 		}
 
 		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -466,11 +468,12 @@ func TestSyncerRaceCondition_ConcurrentStress(t *testing.T) {
 		require.NoError(t, verifierClient.FlushAll(ctx).Err())
 
 		// Config (Aggressive)
-		cfg := syncer.Config{
-			PopTimeout:     50 * time.Millisecond,
-			HydrationCheck: 500 * time.Millisecond,
-			MaxRetries:     1,
-			BaseRetryDelay: 5 * time.Millisecond,
+		cfg := config.SyncerConfig{
+			PopTimeout:             50 * time.Millisecond,
+			HydrationCheckInterval: 500 * time.Millisecond,
+			MaxRetries:             1,
+			BaseRetryDelay:         5 * time.Millisecond,
+			HydrationConcurrency:   10,
 		}
 
 		logger := slog.New(slog.NewTextHandler(io.Discard, nil))

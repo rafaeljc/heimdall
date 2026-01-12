@@ -78,7 +78,7 @@ func run() error {
 	// Layer 2: Service Logic
 	worker := syncer.New(
 		log,
-		syncer.Config{}, // Use defaults
+		cfg.Syncer,
 		flagRepo,
 		redisCache,
 	)
