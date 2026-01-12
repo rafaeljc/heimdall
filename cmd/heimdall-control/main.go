@@ -45,11 +45,6 @@ func run() error {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
 	// -------------------------------------------------------------------------
 	// 1. Logger Setup
 	// -------------------------------------------------------------------------
@@ -63,7 +58,7 @@ func run() error {
 	slog.SetDefault(log)
 
 	log.Info("starting service",
-		slog.String("port", port),
+		slog.String("port", cfg.Server.Control.Port),
 		slog.String("env", cfg.App.Environment),
 	)
 
@@ -103,7 +98,7 @@ func run() error {
 	// -------------------------------------------------------------------------
 
 	server := &http.Server{
-		Addr:              ":" + port,
+		Addr:              ":" + cfg.Server.Control.Port,
 		Handler:           api.Router,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
@@ -116,7 +111,7 @@ func run() error {
 	// log the "Listening" message with confidence.
 	listener, err := net.Listen("tcp", server.Addr)
 	if err != nil {
-		return fmt.Errorf("failed to bind port %s: %w", port, err)
+		return fmt.Errorf("failed to bind port %s: %w", cfg.Server.Control.Port, err)
 	}
 
 	log.Info("server listening", slog.String("address", listener.Addr().String()))
