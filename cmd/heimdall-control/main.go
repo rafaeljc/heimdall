@@ -72,8 +72,8 @@ func run() error {
 	// Create a background context for the initialization phase
 	ctx := context.Background()
 
-	// Initialize the DB Pool.
-	pgPool, err := database.NewPostgresPool(ctx, cfg.Database.ConnectionString())
+	// Initialize the DB Pool using config package
+	pgPool, err := database.NewPostgresPool(ctx, &cfg.Database)
 	if err != nil {
 		return fmt.Errorf("could not connect to database: %w", err)
 	}

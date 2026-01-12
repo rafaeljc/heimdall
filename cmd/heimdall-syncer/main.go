@@ -54,8 +54,8 @@ func run() error {
 	// 2. Infrastructure Setup
 	// -------------------------------------------------------------------------
 
-	// Initialize Postgres Pool
-	pgPool, err := database.NewPostgresPool(ctx, cfg.Database.ConnectionString())
+	// Initialize Postgres Pool using config package
+	pgPool, err := database.NewPostgresPool(ctx, &cfg.Database)
 	if err != nil {
 		return fmt.Errorf("failed to connect to postgres: %w", err)
 	}

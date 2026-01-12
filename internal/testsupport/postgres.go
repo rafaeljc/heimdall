@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rafaeljc/heimdall/internal/config"
 	"github.com/rafaeljc/heimdall/internal/database"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -80,8 +81,16 @@ func StartPostgresContainer(ctx context.Context, migrationsDir string) (*Postgre
 		return nil, fmt.Errorf("failed to get connection string: %w", err)
 	}
 
-	// 5. Initialize Application DB Client
-	pool, err := database.NewPostgresPool(ctx, connStr)
+	// 5. Initialize Application DB Client with test config.DatabaseConfig
+	testCfg := &config.DatabaseConfig{
+		URL:             connStr,
+		MaxConns:        5,
+		MinConns:        1,
+		MaxConnLifetime: 30 * time.Minute,
+		MaxConnIdleTime: 5 * time.Minute,
+		ConnectTimeout:  5 * time.Second,
+	}
+	pool, err := database.NewPostgresPool(ctx, testCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pgx pool: %w", err)
 	}

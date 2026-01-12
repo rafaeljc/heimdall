@@ -21,8 +21,8 @@ type DatabaseConfig struct {
 	SSLMode string `envconfig:"SSL_MODE" default:"prefer" validate:"oneof=disable allow prefer require verify-ca verify-full"`
 
 	// Connection Pool
-	MaxConns        int           `envconfig:"MAX_CONNS" default:"25" validate:"min=1"`
-	MinConns        int           `envconfig:"MIN_CONNS" default:"2" validate:"min=0"`
+	MaxConns        int32         `envconfig:"MAX_CONNS" default:"25" validate:"min=1"`
+	MinConns        int32         `envconfig:"MIN_CONNS" default:"2" validate:"min=0"`
 	MaxConnLifetime time.Duration `envconfig:"MAX_CONN_LIFETIME" default:"1h"`
 	MaxConnIdleTime time.Duration `envconfig:"MAX_CONN_IDLE_TIME" default:"30m"`
 	ConnectTimeout  time.Duration `envconfig:"CONNECT_TIMEOUT" default:"5s"`
