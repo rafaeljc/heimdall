@@ -43,11 +43,6 @@ func run() error {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "50051"
-	}
-
 	// -------------------------------------------------------------------------
 	// 1. Logger Setup
 	// -------------------------------------------------------------------------
@@ -60,7 +55,7 @@ func run() error {
 	slog.SetDefault(log)
 
 	log.Info("starting service",
-		slog.String("port", port),
+		slog.String("port", cfg.Server.Data.Port),
 		slog.String("env", cfg.App.Environment),
 	)
 
@@ -98,11 +93,11 @@ func run() error {
 	// -------------------------------------------------------------------------
 
 	// Create the TCP listener first (Fail Fast)
-	listener, err := net.Listen("tcp", ":"+port)
+	listener, err := net.Listen("tcp", ":"+cfg.Server.Data.Port)
 	if err != nil {
 		api.Close()
 		redisCache.Close()
-		return fmt.Errorf("failed to bind port %s: %w", port, err)
+		return fmt.Errorf("failed to bind port %s: %w", cfg.Server.Data.Port, err)
 	}
 
 	// Define Server Options (Interceptors)
