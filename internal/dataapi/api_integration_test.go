@@ -55,8 +55,10 @@ func setupEnv(t *testing.T) (pb.DataPlaneClient, cache.Service, func()) {
 	// Parse endpoint into host:port for config
 	host, port, _ := strings.Cut(endpoint, ":")
 	redisConfig := &config.RedisConfig{
-		Host: host,
-		Port: port,
+		Host:           host,
+		Port:           port,
+		PingMaxRetries: 5,
+		PingBackoff:    2 * time.Second,
 	}
 	l2, err := cache.NewRedisCache(ctx, redisConfig)
 	require.NoError(t, err)

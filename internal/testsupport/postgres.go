@@ -89,6 +89,8 @@ func StartPostgresContainer(ctx context.Context, migrationsDir string) (*Postgre
 		MaxConnLifetime: 30 * time.Minute,
 		MaxConnIdleTime: 5 * time.Minute,
 		ConnectTimeout:  5 * time.Second,
+		PingMaxRetries:  5,
+		PingBackoff:     2 * time.Second,
 	}
 	pool, err := database.NewPostgresPool(ctx, testCfg)
 	if err != nil {

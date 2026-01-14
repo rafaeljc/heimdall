@@ -4,9 +4,12 @@ package database
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rafaeljc/heimdall/internal/config"
+	"github.com/rafaeljc/heimdall/internal/logger"
 )
 
 // NewPostgresPool initializes a PostgreSQL connection pool using DatabaseConfig.
@@ -38,11 +41,26 @@ func NewPostgresPool(ctx context.Context, dbCfg *config.DatabaseConfig) (*pgxpoo
 		return nil, fmt.Errorf("failed to create connection pool: %w", err)
 	}
 
-	// Verify connection (Ping) immediately to ensure network is healthy
-	if err := pool.Ping(initCtx); err != nil {
-		pool.Close() // Clean up if ping fails
-		return nil, fmt.Errorf("failed to ping database: %w", err)
+	// Retry ping with exponential backoff
+	maxRetries := dbCfg.PingMaxRetries
+	backoff := dbCfg.PingBackoff
+	var lastErr error
+	log := logger.FromContext(ctx)
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		log.Info("database ping attempt", slog.Int("attempt", attempt), slog.Int("max_retries", maxRetries))
+		if err := pool.Ping(initCtx); err == nil {
+			log.Info("database ping successful", slog.Int("attempt", attempt))
+			return pool, nil
+		} else {
+			log.Warn("database ping failed", slog.Int("attempt", attempt), slog.Any("error", err))
+			lastErr = err
+			if attempt < maxRetries {
+				log.Info("database waiting before next attempt", slog.Duration("backoff", backoff))
+				time.Sleep(backoff)
+				backoff *= 2
+			}
+		}
 	}
-
-	return pool, nil
+	pool.Close()
+	return nil, fmt.Errorf("failed to ping database after %d retries: %w", maxRetries, lastErr)
 }

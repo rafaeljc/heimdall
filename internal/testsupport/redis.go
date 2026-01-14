@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/rafaeljc/heimdall/internal/cache"
 	"github.com/rafaeljc/heimdall/internal/config"
@@ -47,10 +48,12 @@ func StartRedisContainer(ctx context.Context) (*RedisContainer, error) {
 	host, port, _ := strings.Cut(endpoint, ":")
 
 	testCfg := &config.RedisConfig{
-		Host:     host,
-		Port:     port,
-		Password: "",
-		DB:       0,
+		Host:           host,
+		Port:           port,
+		Password:       "",
+		DB:             0,
+		PingMaxRetries: 5,
+		PingBackoff:    2 * time.Second,
 	}
 	cacheClient, err := cache.NewRedisCache(ctx, testCfg)
 	if err != nil {
