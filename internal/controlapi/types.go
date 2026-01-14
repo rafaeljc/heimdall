@@ -123,12 +123,15 @@ func (r *CreateFlagRequest) Validate() *ErrorResponse {
 	}
 
 	if len(r.Rules) > 0 {
-		var rules map[string]interface{}
-		if err := json.Unmarshal(r.Rules, &rules); err != nil {
-			return &ErrorResponse{
-				Code:    "ERR_INVALID_INPUT",
-				Message: "Rules must be a valid JSON array or object (empty for now)",
-			}
+		// Only accept JSON arrays for rules
+		var arr []map[string]any
+		if err := json.Unmarshal(r.Rules, &arr); err == nil {
+			// It's a valid array
+			return nil
+		}
+		return &ErrorResponse{
+			Code:    "ERR_INVALID_INPUT",
+			Message: "Rules must be a valid JSON array (empty for now)",
 		}
 	}
 
@@ -155,12 +158,15 @@ func (r *UpdateFlagRequest) Validate() *ErrorResponse {
 	}
 
 	if r.Rules != nil && len(*r.Rules) > 0 {
-		var rules map[string]interface{}
-		if err := json.Unmarshal(*r.Rules, &rules); err != nil {
-			return &ErrorResponse{
-				Code:    "ERR_INVALID_INPUT",
-				Message: "Rules must be a valid JSON array or object",
-			}
+		// Only accept JSON arrays for rules
+		var arr []map[string]any
+		if err := json.Unmarshal(*r.Rules, &arr); err == nil {
+			// It's a valid array
+			return nil
+		}
+		return &ErrorResponse{
+			Code:    "ERR_INVALID_INPUT",
+			Message: "Rules must be a valid JSON array (empty for now)",
 		}
 	}
 
@@ -170,7 +176,7 @@ func (r *UpdateFlagRequest) Validate() *ErrorResponse {
 // PaginatedResponse is a standard wrapper for list endpoints to support offset pagination.
 type PaginatedResponse struct {
 	// Data holds the list of resources (e.g., []Flag).
-	Data interface{} `json:"data"`
+	Data any `json:"data"`
 
 	// Meta contains pagination metadata.
 	Pagination Pagination `json:"pagination"`
