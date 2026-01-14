@@ -28,6 +28,10 @@ type RedisConfig struct {
 	MaxRetries      int           `envconfig:"MAX_RETRIES" default:"3" validate:"min=0"`
 	MinRetryBackoff time.Duration `envconfig:"MIN_RETRY_BACKOFF" default:"8ms"`
 	MaxRetryBackoff time.Duration `envconfig:"MAX_RETRY_BACKOFF" default:"512ms"`
+
+	// Ping/connection retry settings
+	PingMaxRetries int           `envconfig:"PING_MAX_RETRIES" default:"5" validate:"min=1"`
+	PingBackoff    time.Duration `envconfig:"PING_BACKOFF" default:"2s"`
 }
 
 // Address returns the Redis address in host:port format.

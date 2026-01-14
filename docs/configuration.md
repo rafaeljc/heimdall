@@ -93,6 +93,8 @@ export HEIMDALL_SERVER_CONTROL_TLS_KEY_FILE=/certs/tls.key
 | `HEIMDALL_DB_MAX_CONN_LIFETIME` | `1h` | - |
 | `HEIMDALL_DB_MAX_CONN_IDLE_TIME` | `30m` | - |
 | `HEIMDALL_DB_CONNECT_TIMEOUT` | `5s` | - |
+| `HEIMDALL_DB_PING_MAX_RETRIES` | `5` | Number of ping attempts before failing |
+| `HEIMDALL_DB_PING_BACKOFF` | `2s` | Initial backoff duration between ping retries (doubles each retry) |
 
 ### Redis
 
@@ -113,6 +115,8 @@ export HEIMDALL_SERVER_CONTROL_TLS_KEY_FILE=/certs/tls.key
 | `HEIMDALL_REDIS_MAX_RETRIES` | `3` | - |
 | `HEIMDALL_REDIS_MIN_RETRY_BACKOFF` | `8ms` | - |
 | `HEIMDALL_REDIS_MAX_RETRY_BACKOFF` | `512ms` | - |
+| `HEIMDALL_REDIS_PING_MAX_RETRIES` | `5` | Number of ping attempts before failing |
+| `HEIMDALL_REDIS_PING_BACKOFF` | `2s` | Initial backoff duration between ping retries (doubles each retry) |
 
 ### Syncer
 

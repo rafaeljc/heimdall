@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,6 +15,32 @@ func TestDatabaseConfig_Validation(t *testing.T) {
 		want    func(t *testing.T, cfg *Config)
 		wantErr bool
 	}{
+		{
+			name: "Should fail validation with PingMaxRetries < 1",
+			envVars: mergeEnvVars(map[string]string{
+				"HEIMDALL_DB_PING_MAX_RETRIES": "0",
+			}),
+			wantErr: true,
+		},
+		{
+			name: "Should parse valid PingMaxRetries and PingBackoff",
+			envVars: mergeEnvVars(map[string]string{
+				"HEIMDALL_DB_PING_MAX_RETRIES": "7",
+				"HEIMDALL_DB_PING_BACKOFF":     "2s",
+			}),
+			want: func(t *testing.T, cfg *Config) {
+				assert.Equal(t, 7, cfg.Database.PingMaxRetries)
+				assert.Equal(t, 2*time.Second, cfg.Database.PingBackoff)
+			},
+			wantErr: false,
+		},
+		{
+			name: "Should fail validation with invalid PingBackoff duration",
+			envVars: mergeEnvVars(map[string]string{
+				"HEIMDALL_DB_PING_BACKOFF": "notaduration",
+			}),
+			wantErr: true,
+		},
 		{
 			name: "Should fail validation when database password missing in production",
 			envVars: func() map[string]string {

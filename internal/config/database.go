@@ -26,6 +26,10 @@ type DatabaseConfig struct {
 	MaxConnLifetime time.Duration `envconfig:"MAX_CONN_LIFETIME" default:"1h"`
 	MaxConnIdleTime time.Duration `envconfig:"MAX_CONN_IDLE_TIME" default:"30m"`
 	ConnectTimeout  time.Duration `envconfig:"CONNECT_TIMEOUT" default:"5s"`
+
+	// Ping/connection retry settings
+	PingMaxRetries int           `envconfig:"PING_MAX_RETRIES" default:"5" validate:"min=1"`
+	PingBackoff    time.Duration `envconfig:"PING_BACKOFF" default:"2s"`
 }
 
 // ConnectionString builds a PostgreSQL connection string.
