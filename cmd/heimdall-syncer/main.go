@@ -111,7 +111,7 @@ func run() error {
 
 	// Give some time for cleanup if needed
 	// (The worker should return quickly after context cancellation)
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(cfg.App.ShutdownTimeout)
 
 	log.Info("service exited successfully")
 	return nil

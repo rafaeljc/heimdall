@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/rafaeljc/heimdall/internal/cache"
 	"github.com/rafaeljc/heimdall/internal/config"
@@ -100,10 +99,10 @@ func run() error {
 	server := &http.Server{
 		Addr:              ":" + cfg.Server.Control.Port,
 		Handler:           api.Router,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		ReadHeaderTimeout: cfg.Server.Control.ReadHeaderTimeout,
+		ReadTimeout:       cfg.Server.Control.ReadTimeout,
+		WriteTimeout:      cfg.Server.Control.WriteTimeout,
+		IdleTimeout:       cfg.Server.Control.IdleTimeout,
 	}
 
 	// Create the Listener explicitly before starting the server.
@@ -145,7 +144,7 @@ func run() error {
 
 	// Create a timeout context to force shutdown after 5 seconds if
 	// pending requests do not finish in time.
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.App.ShutdownTimeout)
 	defer cancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {

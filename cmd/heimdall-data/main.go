@@ -153,7 +153,7 @@ func run() error {
 		close(stopped)
 	}()
 
-	t := time.NewTimer(5 * time.Second)
+	t := time.NewTimer(cfg.App.ShutdownTimeout)
 	select {
 	case <-stopped:
 		log.Info("grpc server stopped gracefully")
