@@ -66,13 +66,16 @@ This repository follows the **Standard Go Project Layout** and manages multiple 
 
 ### Running Locally
 
-To spin up the entire "Walking Skeleton" (Databases + Services + Docs):
+To spin up the entire application (Databases + Services + Docs):
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/rafaeljc/heimdall.git
+git clone https://github.com/rafaeljc/heimdall.git && cd heimdall
 
-# 2. Start the environment
+# 2. Copy the example environment file
+cp .env.example .env
+
+# 3. Start the environment
 task dev:up
 ```
 
@@ -87,20 +90,6 @@ This will start:
 ### Configuration
 
 Heimdall uses environment variables with the `HEIMDALL_` prefix. See **[Configuration Reference](docs/configuration.md)** for complete documentation.
-
-**Quick Start (Development):**
-
-```bash
-export HEIMDALL_DB_HOST=localhost
-export HEIMDALL_DB_PORT=5432
-export HEIMDALL_DB_NAME=heimdall
-export HEIMDALL_DB_USER=heimdall
-export HEIMDALL_DB_PASSWORD=dev_password
-
-export HEIMDALL_REDIS_HOST=localhost
-export HEIMDALL_REDIS_PORT=6379
-export HEIMDALL_REDIS_PASSWORD=dev_redis_pass
-```
 
 ### Development Commands
 
