@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	"github.com/rafaeljc/heimdall/internal/cache"
+	"github.com/rafaeljc/heimdall/internal/config"
 	"github.com/rafaeljc/heimdall/internal/dataapi"
 	"github.com/rafaeljc/heimdall/internal/logger"
 	"github.com/rafaeljc/heimdall/internal/ruleengine"
@@ -34,20 +35,18 @@ func main() {
 
 // run executes the service lifecycle.
 func run() error {
-	appName := "heimdall-data-plane"
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "50051"
+	// -------------------------------------------------------------------------
+	// 0. Configuration
+	// -------------------------------------------------------------------------
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
 	}
-	appEnv := os.Getenv("APP_ENV")
-	logLevel := os.Getenv("LOG_LEVEL")
 
 	// -------------------------------------------------------------------------
-	// 0. Logger Setup
+	// 1. Logger Setup
 	// -------------------------------------------------------------------------
-	logCfg := logger.NewConfig(appName, appEnv, logLevel)
-
-	log := logger.New(logCfg)
+	log := logger.New(&cfg.App)
 
 	// Set Global Default.
 	// This ensures that:
@@ -56,17 +55,9 @@ func run() error {
 	slog.SetDefault(log)
 
 	log.Info("starting service",
-		slog.String("port", port),
-		slog.String("env", string(logCfg.Environment)),
+		slog.String("port", cfg.Server.Data.Port),
+		slog.String("env", cfg.App.Environment),
 	)
-
-	// -------------------------------------------------------------------------
-	// 1. Configuration
-	// -------------------------------------------------------------------------
-	redisURL := os.Getenv("REDIS_URL")
-	if redisURL == "" {
-		return fmt.Errorf("REDIS_URL environment variable is required")
-	}
 
 	// Background context for initialization
 	ctx := context.Background()
@@ -79,7 +70,7 @@ func run() error {
 	engine := ruleengine.New(log)
 
 	// Initialize Redis Client (L2 Cache)
-	redisCache, err := cache.NewRedisCache(ctx, redisURL)
+	redisCache, err := cache.NewRedisCache(ctx, &cfg.Redis)
 	if err != nil {
 		return fmt.Errorf("failed to connect to redis: %w", err)
 	}
@@ -91,7 +82,7 @@ func run() error {
 	// -------------------------------------------------------------------------
 
 	// Initialize the gRPC API implementation
-	api, err := dataapi.NewAPI(log, redisCache, engine)
+	api, err := dataapi.NewAPI(&cfg.Server.Data, log, redisCache, engine)
 	if err != nil {
 		redisCache.Close()
 		return fmt.Errorf("failed to initialize data api: %w", err)
@@ -102,11 +93,11 @@ func run() error {
 	// -------------------------------------------------------------------------
 
 	// Create the TCP listener first (Fail Fast)
-	listener, err := net.Listen("tcp", ":"+port)
+	listener, err := net.Listen("tcp", ":"+cfg.Server.Data.Port)
 	if err != nil {
 		api.Close()
 		redisCache.Close()
-		return fmt.Errorf("failed to bind port %s: %w", port, err)
+		return fmt.Errorf("failed to bind port %s: %w", cfg.Server.Data.Port, err)
 	}
 
 	// Define Server Options (Interceptors)
@@ -125,7 +116,7 @@ func run() error {
 	// Enable Server Reflection.
 	// This allows tools like 'grpcurl' or Postman to inspect the API
 	// dynamically without needing the .proto file locally.
-	if logger.Environment(appEnv) != logger.EnvProd {
+	if cfg.App.Environment != config.EnvironmentProduction {
 		reflection.Register(grpcServer)
 		log.Info("grpc reflection enabled")
 	}
@@ -162,7 +153,7 @@ func run() error {
 		close(stopped)
 	}()
 
-	t := time.NewTimer(5 * time.Second)
+	t := time.NewTimer(cfg.App.ShutdownTimeout)
 	select {
 	case <-stopped:
 		log.Info("grpc server stopped gracefully")

@@ -849,6 +849,132 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 			return val == expectedMessage
 		}, 2*time.Second, 100*time.Millisecond, "Flag key with version must appear in Redis update queue")
 	})
+
+	// -------------------------------------------------------------------------
+	// SCENARIO 6: Custom integration tests for rules field
+	// -------------------------------------------------------------------------
+
+	t.Run("POST /flags - Valid non-empty rules JSON array", func(t *testing.T) {
+		// Arrange: Prepare a valid rules array and unique key
+		key := fmt.Sprintf("feature-rules-valid-%d", time.Now().UnixNano())
+		validRules := []map[string]any{
+			{"attribute": "user_id", "operator": "eq", "value": "123"},
+		}
+		input := map[string]any{
+			"key":   key,
+			"name":  "Feature With Rules",
+			"rules": validRules,
+		}
+		body, _ := json.Marshal(input)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/flags", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+
+		// Act
+		api.Router.ServeHTTP(rr, req)
+
+		// Assert
+		require.Equal(t, http.StatusCreated, rr.Code)
+		var resp controlapi.Flag
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+		assert.NotEqual(t, "[]", string(resp.Rules), "Rules should not be empty")
+	})
+
+	t.Run("POST /flags - Invalid rule in rules JSON array", func(t *testing.T) {
+		// Arrange: Prepare an invalid rules value and unique key
+		key := fmt.Sprintf("feature-rules-invalid-%d", time.Now().UnixNano())
+		invalidRules := "not-a-json-array"
+		input := map[string]any{
+			"key":   key,
+			"name":  "Feature With Invalid Rules",
+			"rules": invalidRules,
+		}
+		body, _ := json.Marshal(input)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/flags", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+
+		// Act
+		api.Router.ServeHTTP(rr, req)
+
+		// Assert
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+		var errResp controlapi.ErrorResponse
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &errResp))
+		assert.Equal(t, "ERR_INVALID_INPUT", errResp.Code)
+	})
+
+	t.Run("PATCH /flags/{key} - Valid non-empty rules JSON array", func(t *testing.T) {
+		// Arrange: Create a flag and prepare a valid rules array
+		key := fmt.Sprintf("update-rules-valid-%d", time.Now().UnixNano())
+		createReq := controlapi.CreateFlagRequest{
+			Key:  key,
+			Name: "Flag To Update Rules",
+		}
+		createBody, _ := json.Marshal(createReq)
+		createHTTPReq := httptest.NewRequest(http.MethodPost, "/api/v1/flags", bytes.NewReader(createBody))
+		createHTTPReq.Header.Set("Content-Type", "application/json")
+		createRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(createRR, createHTTPReq)
+		require.Equal(t, http.StatusCreated, createRR.Code)
+		createdETag := createRR.Header().Get("ETag")
+
+		validRules := []map[string]any{
+			{"attribute": "user_id", "operator": "eq", "value": "456"},
+		}
+		updateReq := map[string]any{
+			"rules": validRules,
+		}
+		updateBody, _ := json.Marshal(updateReq)
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/flags/"+key, bytes.NewReader(updateBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("If-Match", createdETag)
+		rr := httptest.NewRecorder()
+
+		// Act
+		api.Router.ServeHTTP(rr, req)
+
+		// Assert
+		require.Equal(t, http.StatusOK, rr.Code)
+		var resp controlapi.Flag
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+		assert.NotEqual(t, "[]", string(resp.Rules), "Rules should not be empty")
+	})
+
+	t.Run("PATCH /flags/{key} - Invalid rule in rules JSON array", func(t *testing.T) {
+		// Arrange: Create a flag and prepare an invalid rules value
+		key := fmt.Sprintf("update-rules-invalid-%d", time.Now().UnixNano())
+		createReq := controlapi.CreateFlagRequest{
+			Key:  key,
+			Name: "Flag To Update Invalid Rules",
+		}
+		createBody, _ := json.Marshal(createReq)
+		createHTTPReq := httptest.NewRequest(http.MethodPost, "/api/v1/flags", bytes.NewReader(createBody))
+		createHTTPReq.Header.Set("Content-Type", "application/json")
+		createRR := httptest.NewRecorder()
+		api.Router.ServeHTTP(createRR, createHTTPReq)
+		require.Equal(t, http.StatusCreated, createRR.Code)
+		createdETag := createRR.Header().Get("ETag")
+
+		invalidRules := "not-a-json-array"
+		updateReq := map[string]any{
+			"rules": invalidRules,
+		}
+		updateBody, _ := json.Marshal(updateReq)
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/flags/"+key, bytes.NewReader(updateBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("If-Match", createdETag)
+		rr := httptest.NewRecorder()
+
+		// Act
+		api.Router.ServeHTTP(rr, req)
+
+		// Assert
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+		var errResp controlapi.ErrorResponse
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &errResp))
+		assert.Equal(t, "ERR_INVALID_INPUT", errResp.Code)
+	})
 }
 
 // TestNewAPIValidation_Integration validates the factory method validation behavior.

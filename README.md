@@ -60,19 +60,22 @@ This repository follows the **Standard Go Project Layout** and manages multiple 
 
 ### Prerequisites
 
-* [Go 1.23+](https://go.dev/)
+* [Go 1.24+](https://go.dev/)
 * [Docker](https://www.docker.com/) & Docker Compose
 * [Task](https://taskfile.dev/)
 
 ### Running Locally
 
-To spin up the entire "Walking Skeleton" (Databases + Services + Docs):
+To spin up the entire application (Databases + Services + Docs):
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/rafaeljc/heimdall.git
+git clone https://github.com/rafaeljc/heimdall.git && cd heimdall
 
-# 2. Start the environment
+# 2. Copy the example environment file
+cp .env.example .env
+
+# 3. Start the environment
 task dev:up
 ```
 
@@ -83,6 +86,10 @@ This will start:
 * Control Plane (Port 8080)
 * Data Plane (Port 50051)
 * Swagger UI (Port 8081)
+
+### Configuration
+
+Heimdall uses environment variables with the `HEIMDALL_` prefix. See **[Configuration Reference](docs/configuration.md)** for complete documentation.
 
 ### Development Commands
 

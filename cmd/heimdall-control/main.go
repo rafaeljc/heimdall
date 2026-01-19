@@ -13,9 +13,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/rafaeljc/heimdall/internal/cache"
+	"github.com/rafaeljc/heimdall/internal/config"
 	"github.com/rafaeljc/heimdall/internal/controlapi"
 	"github.com/rafaeljc/heimdall/internal/database"
 	"github.com/rafaeljc/heimdall/internal/logger"
@@ -36,21 +36,19 @@ func main() {
 // It returns an error instead of exiting directly, allowing deferred functions
 // (like database cleanup) to execute properly before the process terminates.
 func run() error {
-	appName := "heimdall-control-plane"
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
+	// -------------------------------------------------------------------------
+	// 0. Configuration
+	// -------------------------------------------------------------------------
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
 	}
-	appEnv := os.Getenv("APP_ENV")
-	logLevel := os.Getenv("LOG_LEVEL")
 
 	// -------------------------------------------------------------------------
-	// 0. Logger Setup
+	// 1. Logger Setup
 	// -------------------------------------------------------------------------
-	logCfg := logger.NewConfig(appName, appEnv, logLevel)
-
-	// Create the logger instance
-	log := logger.New(logCfg)
+	// Create the logger instance using config
+	log := logger.New(&cfg.App)
 
 	// Set Global Default.
 	// This ensures that:
@@ -59,40 +57,24 @@ func run() error {
 	slog.SetDefault(log)
 
 	log.Info("starting service",
-		slog.String("port", port),
-		slog.String("env", string(logCfg.Environment)),
+		slog.String("port", cfg.Server.Control.Port),
+		slog.String("env", cfg.App.Environment),
 	)
 
-	// -------------------------------------------------------------------------
-	// 1. Configuration
-	// -------------------------------------------------------------------------
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		return fmt.Errorf("DATABASE_URL environment variable is required")
-	}
-	redisURL := os.Getenv("REDIS_URL")
-	if redisURL == "" {
-		return fmt.Errorf("REDIS_URL environment variable is required")
-	}
-
-	// API Key Authentication
-	apiKeyHash := os.Getenv("API_KEY_HASH")
-	if apiKeyHash == "" {
-		return fmt.Errorf("API_KEY_HASH environment variable is required")
-	}
+	apiKeyHash := cfg.Server.Control.APIKeyHash
 
 	// Create a background context for the initialization phase
 	ctx := context.Background()
 
-	// Initialize the DB Pool.
-	pgPool, err := database.NewPostgresPool(ctx, dbURL)
+	// Initialize the DB Pool using config package
+	pgPool, err := database.NewPostgresPool(ctx, &cfg.Database)
 	if err != nil {
 		return fmt.Errorf("could not connect to database: %w", err)
 	}
 	defer pgPool.Close()
 
 	// Initialize Redis Client
-	redisCache, err := cache.NewRedisCache(ctx, redisURL)
+	redisCache, err := cache.NewRedisCache(ctx, &cfg.Redis)
 	if err != nil {
 		return fmt.Errorf("failed to connect to redis: %w", err)
 	}
@@ -115,12 +97,12 @@ func run() error {
 	// -------------------------------------------------------------------------
 
 	server := &http.Server{
-		Addr:              ":" + port,
+		Addr:              ":" + cfg.Server.Control.Port,
 		Handler:           api.Router,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		ReadHeaderTimeout: cfg.Server.Control.ReadHeaderTimeout,
+		ReadTimeout:       cfg.Server.Control.ReadTimeout,
+		WriteTimeout:      cfg.Server.Control.WriteTimeout,
+		IdleTimeout:       cfg.Server.Control.IdleTimeout,
 	}
 
 	// Create the Listener explicitly before starting the server.
@@ -128,7 +110,7 @@ func run() error {
 	// log the "Listening" message with confidence.
 	listener, err := net.Listen("tcp", server.Addr)
 	if err != nil {
-		return fmt.Errorf("failed to bind port %s: %w", port, err)
+		return fmt.Errorf("failed to bind port %s: %w", cfg.Server.Control.Port, err)
 	}
 
 	log.Info("server listening", slog.String("address", listener.Addr().String()))
@@ -162,7 +144,7 @@ func run() error {
 
 	// Create a timeout context to force shutdown after 5 seconds if
 	// pending requests do not finish in time.
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.App.ShutdownTimeout)
 	defer cancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {

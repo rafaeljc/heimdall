@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rafaeljc/heimdall/internal/cache"
+	"github.com/rafaeljc/heimdall/internal/config"
 	"github.com/rafaeljc/heimdall/internal/database"
 	"github.com/rafaeljc/heimdall/internal/logger"
 	"github.com/rafaeljc/heimdall/internal/store"
@@ -25,16 +26,18 @@ func main() {
 }
 
 func run() error {
-	appName := "heimdall-syncer"
-	appEnv := os.Getenv("APP_ENV")
-	logLevel := os.Getenv("LOG_LEVEL")
+	// -------------------------------------------------------------------------
+	// 0. Configuration
+	// -------------------------------------------------------------------------
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
 
 	// -------------------------------------------------------------------------
-	// 0. Logger Setup
+	// 1. Logger Setup
 	// -------------------------------------------------------------------------
-	logCfg := logger.NewConfig(appName, appEnv, logLevel)
-
-	log := logger.New(logCfg)
+	log := logger.New(&cfg.App)
 
 	// Set Global Default
 	// Crucial so that 'slog.Info' calls within this file use the correct format
@@ -42,18 +45,6 @@ func run() error {
 	slog.SetDefault(log)
 
 	log.Info("starting service")
-
-	// -------------------------------------------------------------------------
-	// 1. Configuration
-	// -------------------------------------------------------------------------
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		return fmt.Errorf("DATABASE_URL environment variable is required")
-	}
-	redisURL := os.Getenv("REDIS_URL")
-	if redisURL == "" {
-		return fmt.Errorf("REDIS_URL environment variable is required")
-	}
 
 	// Create a background context that we can cancel on shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -63,15 +54,15 @@ func run() error {
 	// 2. Infrastructure Setup
 	// -------------------------------------------------------------------------
 
-	// Initialize Postgres Pool
-	pgPool, err := database.NewPostgresPool(ctx, dbURL)
+	// Initialize Postgres Pool using config package
+	pgPool, err := database.NewPostgresPool(ctx, &cfg.Database)
 	if err != nil {
 		return fmt.Errorf("failed to connect to postgres: %w", err)
 	}
 	defer pgPool.Close()
 
 	// Initialize Redis Client
-	redisCache, err := cache.NewRedisCache(ctx, redisURL)
+	redisCache, err := cache.NewRedisCache(ctx, &cfg.Redis)
 	if err != nil {
 		return fmt.Errorf("failed to connect to redis: %w", err)
 	}
@@ -87,7 +78,7 @@ func run() error {
 	// Layer 2: Service Logic
 	worker := syncer.New(
 		log,
-		syncer.Config{}, // Use defaults
+		cfg.Syncer,
 		flagRepo,
 		redisCache,
 	)
@@ -120,7 +111,7 @@ func run() error {
 
 	// Give some time for cleanup if needed
 	// (The worker should return quickly after context cancellation)
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(cfg.App.ShutdownTimeout)
 
 	log.Info("service exited successfully")
 	return nil

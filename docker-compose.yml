@@ -5,48 +5,48 @@ services:
     image: postgres:15-alpine
     container_name: heimdall-postgres
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: heimdall
+      POSTGRES_USER: ${HEIMDALL_DB_USER}
+      POSTGRES_PASSWORD: ${HEIMDALL_DB_PASSWORD}
+      POSTGRES_DB: ${HEIMDALL_DB_NAME}
     ports:
-      - "5432:5432" # Host:Container
+      - "${HEIMDALL_DB_PORT}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d
     networks:
       - heimdall-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d heimdall"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
-      timeout: 5s
+      timeout: 30s
       retries: 5
     
   redis:
     image: redis:7-alpine
     container_name: heimdall-redis
+    environment:
+      - REDIS_PASSWORD=${HEIMDALL_REDIS_PASSWORD}
+    command: ["redis-server", "--requirepass", "${HEIMDALL_REDIS_PASSWORD}"]
     ports:
-      - "6379:6379" # Host:Container
+      - "${HEIMDALL_REDIS_PORT}:6379"
     networks:
       - heimdall-net
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${HEIMDALL_REDIS_PASSWORD}", "ping"]
       interval: 5s
-      timeout: 5s
+      timeout: 30s
       retries: 5
 
   # Heimdall Services
   control-plane:
     container_name: heimdall-control
     build:
-      context: . # Root context to access /internal
+      context: .
       dockerfile: Dockerfile.control-plane
     ports:
-      - "8080:8080" # REST API
-    environment:
-      - DATABASE_URL=postgres://user:password@postgres:5432/heimdall?sslmode=disable
-      - REDIS_URL=redis:6379
-      - LOG_LEVEL=debug
-      - API_KEY_HASH=${API_KEY_HASH:-}  # Optional: set via .env file or shell
+      - "${HEIMDALL_SERVER_CONTROL_PORT}:8080"
+    env_file:
+      - .env
     depends_on:
       postgres:
         condition: service_healthy
@@ -61,10 +61,9 @@ services:
       context: .
       dockerfile: Dockerfile.data-plane
     ports:
-      - "50051:50051" # gRPC API
-    environment:
-      - REDIS_URL=redis:6379
-      - LOG_LEVEL=debug
+      - "${HEIMDALL_SERVER_DATA_PORT}:50051"
+    env_file:
+      - .env
     depends_on:
       redis:
         condition: service_healthy
@@ -76,10 +75,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.syncer
-    environment:
-      - DATABASE_URL=postgres://user:password@postgres:5432/heimdall?sslmode=disable
-      - REDIS_URL=redis:6379
-      - LOG_LEVEL=debug
+    env_file:
+      - .env
     depends_on:
       postgres:
         condition: service_healthy

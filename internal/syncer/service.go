@@ -11,49 +11,28 @@ import (
 	"time"
 
 	"github.com/rafaeljc/heimdall/internal/cache"
+	"github.com/rafaeljc/heimdall/internal/config"
 	"github.com/rafaeljc/heimdall/internal/ruleengine"
 	"github.com/rafaeljc/heimdall/internal/store"
 )
 
 // hydrationConcurrency defines how many concurrent goroutines
 // will be used during the hydration process.
-const hydrationConcurrency = 10
-
-// Config holds the configuration for the Syncer service.
-type Config struct {
-	PopTimeout     time.Duration
-	HydrationCheck time.Duration
-	MaxRetries     int
-	BaseRetryDelay time.Duration
-}
+// No local Config struct; use config.SyncerConfig
 
 // Service orchestrates the synchronization process.
 type Service struct {
 	logger *slog.Logger
-	config Config
+	config config.SyncerConfig
 	repo   store.FlagRepository
 	cache  cache.Service
 	mu     sync.Mutex
 }
 
 // New creates a new Syncer service.
-func New(logger *slog.Logger, cfg Config, repo store.FlagRepository, cacheSvc cache.Service) *Service {
+func New(logger *slog.Logger, cfg config.SyncerConfig, repo store.FlagRepository, cacheSvc cache.Service) *Service {
 	if logger == nil {
 		logger = slog.Default()
-	}
-
-	// Validate config
-	if cfg.PopTimeout <= 0 {
-		cfg.PopTimeout = 5 * time.Second
-	}
-	if cfg.HydrationCheck <= 0 {
-		cfg.HydrationCheck = 10 * time.Second
-	}
-	if cfg.MaxRetries <= 0 {
-		cfg.MaxRetries = 3
-	}
-	if cfg.BaseRetryDelay <= 0 {
-		cfg.BaseRetryDelay = 500 * time.Millisecond
 	}
 
 	return &Service{
@@ -82,7 +61,7 @@ func (s *Service) Run(ctx context.Context) error {
 
 // runWatchdog periodically checks if the cache is hydrated and triggers hydration if needed.
 func (s *Service) runWatchdog(ctx context.Context) {
-	timer := time.NewTimer(s.config.HydrationCheck)
+	timer := time.NewTimer(s.config.HydrationCheckInterval)
 	defer timer.Stop()
 
 	for {
@@ -99,7 +78,7 @@ func (s *Service) runWatchdog(ctx context.Context) {
 					s.logger.Error("watchdog: hydration failed", slog.String("error", err.Error()))
 				}
 			}
-			timer.Reset(s.config.HydrationCheck)
+			timer.Reset(s.config.HydrationCheckInterval)
 		}
 	}
 }
@@ -186,7 +165,7 @@ func (s *Service) performHydration(ctx context.Context) error {
 		return err
 	}
 
-	sem := make(chan struct{}, hydrationConcurrency)
+	sem := make(chan struct{}, s.config.HydrationConcurrency)
 	var wg sync.WaitGroup
 
 	for _, f := range flags {
