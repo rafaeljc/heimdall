@@ -60,8 +60,8 @@ jobs:
         # Runs the strict linter configuration defined in .golangci.yml
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.61.0
-          args: --timeout=5m
+           version: v1.64.2
+           args: --timeout=5m
 
       - name: Run Unit Tests
         # Runs standard unit tests
