@@ -26,7 +26,7 @@ func TestRedisCache_LuaScript_Integration(t *testing.T) {
 	defer redisCtr.Terminate(ctx)
 
 	// System Under Test (SUT)
-	appCache := redisCtr.Client
+	appCache := redisCtr.Cache
 
 	// Spy Client (Side-channel verification)
 	// Used to peek into Redis raw data or inject corruption.

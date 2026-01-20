@@ -70,7 +70,7 @@ func run() error {
 	engine := ruleengine.New(log)
 
 	// Initialize Redis Client (L2 Cache)
-	redisCache, err := cache.NewRedisCache(ctx, &cfg.Redis)
+	redisClient, err := cache.NewRedisClient(ctx, &cfg.Redis)
 	if err != nil {
 		return fmt.Errorf("failed to connect to redis: %w", err)
 	}
@@ -80,11 +80,12 @@ func run() error {
 	// -------------------------------------------------------------------------
 	// 3. Wiring (Dependency Injection)
 	// -------------------------------------------------------------------------
+	redisCache := cache.NewRedisCache(redisClient)
 
 	// Initialize the gRPC API implementation
 	api, err := dataapi.NewAPI(&cfg.Server.Data, log, redisCache, engine)
 	if err != nil {
-		redisCache.Close()
+		redisClient.Close()
 		return fmt.Errorf("failed to initialize data api: %w", err)
 	}
 
@@ -96,7 +97,7 @@ func run() error {
 	listener, err := net.Listen("tcp", ":"+cfg.Server.Data.Port)
 	if err != nil {
 		api.Close()
-		redisCache.Close()
+		redisClient.Close()
 		return fmt.Errorf("failed to bind port %s: %w", cfg.Server.Data.Port, err)
 	}
 
@@ -166,7 +167,7 @@ func run() error {
 	api.Close()
 
 	log.Info("closing redis connection")
-	if err := redisCache.Close(); err != nil {
+	if err := redisClient.Close(); err != nil {
 		log.Error("error closing redis", slog.String("error", err.Error()))
 	}
 

@@ -129,7 +129,7 @@ func TestSyncerRaceCondition_Integration(t *testing.T) {
 		}
 
 		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-		svc := syncer.New(logger, cfg, repo, redisCtr.Client)
+		svc := syncer.New(logger, cfg, repo, redisCtr.Cache)
 
 		// Start Async
 		syncCtx, cancel := context.WithCancel(ctx)
@@ -477,7 +477,7 @@ func TestSyncerRaceCondition_ConcurrentStress(t *testing.T) {
 		}
 
 		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-		svc := syncer.New(logger, cfg, repo, redisCtr.Client)
+		svc := syncer.New(logger, cfg, repo, redisCtr.Cache)
 
 		// Start Async
 		syncCtx, cancel := context.WithCancel(ctx)

@@ -15,13 +15,13 @@ import (
 // RedisContainer holds references to the ephemeral Redis instance.
 type RedisContainer struct {
 	Container testcontainers.Container
-	// Client is the wrapped Heimdall cache service.
-	Client cache.Service
+	// Cache is the wrapped Heimdall cache service.
+	Cache cache.Service
 }
 
 // Terminate cleans up the container and closes the client.
 func (c *RedisContainer) Terminate(ctx context.Context) error {
-	c.Client.Close()
+	c.Cache.Close()
 	return c.Container.Terminate(ctx)
 }
 
@@ -55,13 +55,14 @@ func StartRedisContainer(ctx context.Context) (*RedisContainer, error) {
 		PingMaxRetries: 5,
 		PingBackoff:    2 * time.Second,
 	}
-	cacheClient, err := cache.NewRedisCache(ctx, testCfg)
+	redisClient, err := cache.NewRedisClient(ctx, testCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create redis client: %w", err)
 	}
+	redisCache := cache.NewRedisCache(redisClient)
 
 	return &RedisContainer{
 		Container: redisContainer,
-		Client:    cacheClient,
+		Cache:     redisCache,
 	}, nil
 }

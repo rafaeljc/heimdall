@@ -74,12 +74,11 @@ func run() error {
 	defer pgPool.Close()
 
 	// Initialize Redis Client
-	redisCache, err := cache.NewRedisCache(ctx, &cfg.Redis)
+	redisClient, err := cache.NewRedisClient(ctx, &cfg.Redis)
 	if err != nil {
 		return fmt.Errorf("failed to connect to redis: %w", err)
 	}
-	defer redisCache.Close()
-
+	defer redisClient.Close()
 	// -------------------------------------------------------------------------
 	// 2. Dependency Injection & Wiring
 	// -------------------------------------------------------------------------
@@ -87,6 +86,9 @@ func run() error {
 	// Layer 1: Data Access (Repository)
 	// We pass the pgPool instance explicitly.
 	flagStore := store.NewPostgresStore(pgPool)
+
+	// We pass the redisClient instance explicitly.
+	redisCache := cache.NewRedisCache(redisClient)
 
 	// Layer 2: API (Controller)
 	// Inject the repository into the API handler with authentication enabled.

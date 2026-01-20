@@ -60,8 +60,9 @@ func setupEnv(t *testing.T) (pb.DataPlaneClient, cache.Service, func()) {
 		PingMaxRetries: 5,
 		PingBackoff:    2 * time.Second,
 	}
-	l2, err := cache.NewRedisCache(ctx, redisConfig)
+	redisClient, err := cache.NewRedisClient(ctx, redisConfig)
 	require.NoError(t, err)
+	l2 := cache.NewRedisCache(redisClient)
 
 	// Rule Engine (Stateless)
 	engine := ruleengine.New(log)
