@@ -191,7 +191,7 @@ func TestHealthConfigEnvValidation(t *testing.T) {
 				"HEIMDALL_HEALTH_TIMEOUT": "2s",
 			},
 			want: func(t *testing.T, cfg *Config) {
-				assert.Equal(t, 9090, cfg.Health.Port)
+				assert.Equal(t, "9090", cfg.Health.Port)
 				assert.Equal(t, 2*time.Second, cfg.Health.Timeout)
 			},
 			wantErr: false,
