@@ -48,10 +48,10 @@ type ServerConfig struct {
 
 // HealthConfig configures health check endpoints.
 type HealthConfig struct {
-	Enabled       bool   `envconfig:"ENABLED" default:"true"`
-	Path          string `envconfig:"PATH" default:"/health"`
-	LivenessPath  string `envconfig:"LIVENESS_PATH" default:"/health/live"`
-	ReadinessPath string `envconfig:"READINESS_PATH" default:"/health/ready"`
+	LivenessPath  string        `envconfig:"LIVENESS_PATH" default:"/healthz"`
+	ReadinessPath string        `envconfig:"READINESS_PATH" default:"/readyz"`
+	Port          int           `envconfig:"PORT" default:"9090" validate:"min=1,max=65535"`
+	Timeout       time.Duration `envconfig:"TIMEOUT" default:"2s" validate:"min=1s"`
 }
 
 // Load reads configuration from environment variables with the HEIMDALL prefix.
@@ -111,7 +111,6 @@ func (c *Config) LogConfig(log *slog.Logger) {
 		slog.String("control_port", c.Server.Control.Port),
 		slog.String("data_port", c.Server.Data.Port),
 		slog.Bool("tls_enabled", c.Server.Control.TLSEnabled),
-		slog.Bool("health_enabled", c.Health.Enabled),
 		slog.Bool("db_configured", c.Database.IsConfigured()),
 		slog.Bool("redis_configured", c.Redis.IsConfigured()),
 	)

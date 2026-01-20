@@ -176,3 +176,63 @@ func TestLoad(t *testing.T) {
 		})
 	}
 }
+
+func TestHealthConfigEnvValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		envVars map[string]string
+		want    func(t *testing.T, cfg *Config)
+		wantErr bool
+	}{
+		{
+			name: "Should load valid health port and timeout",
+			envVars: map[string]string{
+				"HEIMDALL_HEALTH_PORT":    "9090",
+				"HEIMDALL_HEALTH_TIMEOUT": "2s",
+			},
+			want: func(t *testing.T, cfg *Config) {
+				assert.Equal(t, 9090, cfg.Health.Port)
+				assert.Equal(t, 2*time.Second, cfg.Health.Timeout)
+			},
+			wantErr: false,
+		},
+		{
+			name: "Should fail validation on port too low",
+			envVars: map[string]string{
+				"HEIMDALL_HEALTH_PORT": "0",
+			},
+			wantErr: true,
+		},
+		{
+			name: "Should fail validation on port too high",
+			envVars: map[string]string{
+				"HEIMDALL_HEALTH_PORT": "65536",
+			},
+			wantErr: true,
+		},
+		{
+			name: "Should fail validation on timeout too short",
+			envVars: map[string]string{
+				"HEIMDALL_HEALTH_TIMEOUT": "999ms",
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for key, value := range mergeEnvVars(tt.envVars) {
+				t.Setenv(key, value)
+			}
+			cfg, err := Load()
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			if tt.want != nil {
+				tt.want(t, cfg)
+			}
+		})
+	}
+}

@@ -133,10 +133,10 @@ export HEIMDALL_SERVER_CONTROL_TLS_KEY_FILE=/certs/tls.key
 
 | Variable | Default |
 |----------|---------|
-| `HEIMDALL_HEALTH_ENABLED` | `true` |
-| `HEIMDALL_HEALTH_PATH` | `/health` |
-| `HEIMDALL_HEALTH_LIVENESS_PATH` | `/health/live` |
-| `HEIMDALL_HEALTH_READINESS_PATH` | `/health/ready` |
+| `HEIMDALL_HEALTH_LIVENESS_PATH` | `/healthz` |
+| `HEIMDALL_HEALTH_READINESS_PATH` | `/readyz` |
+| `HEIMDALL_HEALTH_PORT` | `9090` |
+| `HEIMDALL_HEALTH_TIMEOUT` | `2s` |
 
 ## Production Requirements
 
