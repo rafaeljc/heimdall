@@ -15,8 +15,12 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /main ./cmd/heimdall-syncer
 FROM alpine:latest
 
 WORKDIR /root/
+
+ARG HEALTH_PORT=9090
+ENV HEIMDALL_HEALTH_PORT=${HEALTH_PORT}
+
 COPY --from=builder /main .
 
-# Syncer is a background worker, no EXPOSE needed
+EXPOSE ${HEIMDALL_HEALTH_PORT}
 
 CMD ["./main"]
