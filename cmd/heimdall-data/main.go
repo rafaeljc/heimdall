@@ -21,6 +21,7 @@ import (
 	"github.com/rafaeljc/heimdall/internal/cache"
 	"github.com/rafaeljc/heimdall/internal/config"
 	"github.com/rafaeljc/heimdall/internal/dataapi"
+	"github.com/rafaeljc/heimdall/internal/health"
 	"github.com/rafaeljc/heimdall/internal/logger"
 	"github.com/rafaeljc/heimdall/internal/ruleengine"
 )
@@ -89,6 +90,14 @@ func run() error {
 		return fmt.Errorf("failed to initialize data api: %w", err)
 	}
 
+	// Health Service Initialization
+	healthSvc := health.NewService(
+		log,
+		cfg,
+		health.NewRedisChecker(redisClient),
+	)
+	healthSvc.Start()
+
 	// -------------------------------------------------------------------------
 	// 4. gRPC Server Setup
 	// -------------------------------------------------------------------------
@@ -153,8 +162,15 @@ func run() error {
 		grpcServer.GracefulStop()
 		close(stopped)
 	}()
-
 	t := time.NewTimer(cfg.App.ShutdownTimeout)
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.App.ShutdownTimeout)
+	defer cancel()
+
+	if err := healthSvc.Stop(shutdownCtx); err != nil {
+		log.Warn("health service shutdown error", slog.String("error", err.Error()))
+	}
+
 	select {
 	case <-stopped:
 		log.Info("grpc server stopped gracefully")
