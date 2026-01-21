@@ -500,6 +500,7 @@ func mapStoreFlagToResponse(f *store.Flag) Flag {
 		Rules:        rulesJSON,
 		CreatedAt:    f.CreatedAt,
 		UpdatedAt:    f.UpdatedAt,
+		Etag:         fmt.Sprintf("%d", f.Version),
 	}
 }
 
