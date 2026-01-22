@@ -154,6 +154,14 @@ components:
           readOnly: true
           example: "2025-11-21T11:30:00Z"
           description: Timestamp of last update. Always returned in UTC (ISO 8601 / RFC 3339).
+        etag:
+          type: string
+          readOnly: true
+          description: |
+            Entity tag representing the current version of the flag.
+            Used for optimistic locking (If-Match) in update and delete operations.
+            Format: "<sequence_number>".
+          example: "5"
 
     # --- Request Bodies ---
     CreateFlagRequest:

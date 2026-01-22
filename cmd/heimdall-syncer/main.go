@@ -13,6 +13,7 @@ import (
 	"github.com/rafaeljc/heimdall/internal/cache"
 	"github.com/rafaeljc/heimdall/internal/config"
 	"github.com/rafaeljc/heimdall/internal/database"
+	"github.com/rafaeljc/heimdall/internal/health"
 	"github.com/rafaeljc/heimdall/internal/logger"
 	"github.com/rafaeljc/heimdall/internal/store"
 	"github.com/rafaeljc/heimdall/internal/syncer"
@@ -62,11 +63,11 @@ func run() error {
 	defer pgPool.Close()
 
 	// Initialize Redis Client
-	redisCache, err := cache.NewRedisCache(ctx, &cfg.Redis)
+	redisClient, err := cache.NewRedisClient(ctx, &cfg.Redis)
 	if err != nil {
 		return fmt.Errorf("failed to connect to redis: %w", err)
 	}
-	defer redisCache.Close()
+	defer redisClient.Close()
 
 	// -------------------------------------------------------------------------
 	// 3. Dependency Injection
@@ -74,6 +75,7 @@ func run() error {
 
 	// Layer 1: Data Access
 	flagRepo := store.NewPostgresStore(pgPool)
+	redisCache := cache.NewRedisCache(redisClient)
 
 	// Layer 2: Service Logic
 	worker := syncer.New(
@@ -82,6 +84,15 @@ func run() error {
 		flagRepo,
 		redisCache,
 	)
+
+	// Health Service Initialization
+	healthSvc := health.NewService(
+		log,
+		cfg,
+		health.NewPostgresChecker(pgPool),
+		health.NewRedisChecker(redisClient),
+	)
+	healthSvc.Start()
 
 	// -------------------------------------------------------------------------
 	// 4. Execution & Graceful Shutdown
@@ -107,6 +118,14 @@ func run() error {
 	case sig := <-sigChan:
 		log.Info("shutdown signal received", slog.String("signal", sig.String()))
 		cancel() // Cancels the context passed to worker.Run(), stopping the loop
+	}
+
+	// Shutdown Health Service
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.App.ShutdownTimeout)
+	defer cancel()
+
+	if err := healthSvc.Stop(shutdownCtx); err != nil {
+		log.Warn("health service shutdown error", slog.String("error", err.Error()))
 	}
 
 	// Give some time for cleanup if needed

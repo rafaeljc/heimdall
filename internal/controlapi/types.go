@@ -41,6 +41,9 @@ type Flag struct {
 
 	// UpdatedAt is the timestamp of the last update in UTC.
 	UpdatedAt time.Time `json:"updated_at"`
+
+	// Etag is the entity tag representing the current version of the flag.
+	Etag string `json:"etag"`
 }
 
 // -----------------------------------------------------------------------------

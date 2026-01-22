@@ -21,6 +21,7 @@ import (
 	"github.com/rafaeljc/heimdall/internal/cache"
 	"github.com/rafaeljc/heimdall/internal/config"
 	"github.com/rafaeljc/heimdall/internal/dataapi"
+	"github.com/rafaeljc/heimdall/internal/health"
 	"github.com/rafaeljc/heimdall/internal/logger"
 	"github.com/rafaeljc/heimdall/internal/ruleengine"
 )
@@ -70,7 +71,7 @@ func run() error {
 	engine := ruleengine.New(log)
 
 	// Initialize Redis Client (L2 Cache)
-	redisCache, err := cache.NewRedisCache(ctx, &cfg.Redis)
+	redisClient, err := cache.NewRedisClient(ctx, &cfg.Redis)
 	if err != nil {
 		return fmt.Errorf("failed to connect to redis: %w", err)
 	}
@@ -80,13 +81,22 @@ func run() error {
 	// -------------------------------------------------------------------------
 	// 3. Wiring (Dependency Injection)
 	// -------------------------------------------------------------------------
+	redisCache := cache.NewRedisCache(redisClient)
 
 	// Initialize the gRPC API implementation
 	api, err := dataapi.NewAPI(&cfg.Server.Data, log, redisCache, engine)
 	if err != nil {
-		redisCache.Close()
+		redisClient.Close()
 		return fmt.Errorf("failed to initialize data api: %w", err)
 	}
+
+	// Health Service Initialization
+	healthSvc := health.NewService(
+		log,
+		cfg,
+		health.NewRedisChecker(redisClient),
+	)
+	healthSvc.Start()
 
 	// -------------------------------------------------------------------------
 	// 4. gRPC Server Setup
@@ -96,7 +106,7 @@ func run() error {
 	listener, err := net.Listen("tcp", ":"+cfg.Server.Data.Port)
 	if err != nil {
 		api.Close()
-		redisCache.Close()
+		redisClient.Close()
 		return fmt.Errorf("failed to bind port %s: %w", cfg.Server.Data.Port, err)
 	}
 
@@ -152,8 +162,15 @@ func run() error {
 		grpcServer.GracefulStop()
 		close(stopped)
 	}()
-
 	t := time.NewTimer(cfg.App.ShutdownTimeout)
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.App.ShutdownTimeout)
+	defer cancel()
+
+	if err := healthSvc.Stop(shutdownCtx); err != nil {
+		log.Warn("health service shutdown error", slog.String("error", err.Error()))
+	}
+
 	select {
 	case <-stopped:
 		log.Info("grpc server stopped gracefully")
@@ -166,7 +183,7 @@ func run() error {
 	api.Close()
 
 	log.Info("closing redis connection")
-	if err := redisCache.Close(); err != nil {
+	if err := redisClient.Close(); err != nil {
 		log.Error("error closing redis", slog.String("error", err.Error()))
 	}
 

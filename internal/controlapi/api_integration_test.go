@@ -66,7 +66,7 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 	// Initialize real dependencies (Repository -> DB)
 	repo := store.NewPostgresStore(pgContainer.DB)
 	// Initialize API with authentication disabled for integration tests
-	api := controlapi.NewAPIWithConfig(repo, redisContainer.Client, "", true)
+	api := controlapi.NewAPIWithConfig(repo, redisContainer.Cache, "", true)
 
 	// -------------------------------------------------------------------------
 	// SCENARIO 1: POST /flags (Creation & Validation)
@@ -1010,7 +1010,7 @@ func TestNewAPIValidation_Integration(t *testing.T) {
 
 	t.Run("NewAPIWithConfig should panic when flagRepo is nil", func(t *testing.T) {
 		assert.PanicsWithValue(t, "controlapi: flag repository cannot be nil", func() {
-			controlapi.NewAPIWithConfig(nil, redisContainer.Client, "valid-hash", false)
+			controlapi.NewAPIWithConfig(nil, redisContainer.Cache, "valid-hash", false)
 		}, "Should panic when flagRepo is nil")
 	})
 
@@ -1022,13 +1022,13 @@ func TestNewAPIValidation_Integration(t *testing.T) {
 
 	t.Run("NewAPIWithConfig should panic when apiKeyHash is empty and skipAuth is false", func(t *testing.T) {
 		assert.PanicsWithValue(t, "controlapi: apiKeyHash cannot be empty when authentication is enabled", func() {
-			controlapi.NewAPIWithConfig(repo, redisContainer.Client, "", false)
+			controlapi.NewAPIWithConfig(repo, redisContainer.Cache, "", false)
 		}, "Should panic when authentication is enabled but apiKeyHash is empty")
 	})
 
 	t.Run("NewAPI should panic when apiKeyHash is empty", func(t *testing.T) {
 		assert.PanicsWithValue(t, "controlapi: apiKeyHash cannot be empty when authentication is enabled", func() {
-			controlapi.NewAPI(repo, redisContainer.Client, "")
+			controlapi.NewAPI(repo, redisContainer.Cache, "")
 		}, "NewAPI should panic when apiKeyHash is empty since it always enables authentication")
 	})
 }
@@ -1068,7 +1068,7 @@ func TestAuthentication_Integration(t *testing.T) {
 	testAPIKeyHash := hex.EncodeToString(hash[:])
 
 	// Initialize API with authentication enabled
-	api := controlapi.NewAPIWithConfig(repo, redisContainer.Client, testAPIKeyHash, false)
+	api := controlapi.NewAPIWithConfig(repo, redisContainer.Cache, testAPIKeyHash, false)
 
 	// 3. Authentication Tests
 
@@ -1363,7 +1363,7 @@ func TestHeaderRequirementsAndResponses(t *testing.T) {
 	}()
 
 	repo := store.NewPostgresStore(pgContainer.DB)
-	api := controlapi.NewAPIWithConfig(repo, redisContainer.Client, "", true)
+	api := controlapi.NewAPIWithConfig(repo, redisContainer.Cache, "", true)
 
 	// -------------------------------------------------------------------------
 	// ETag Header Tests

@@ -48,10 +48,10 @@ type ServerConfig struct {
 
 // HealthConfig configures health check endpoints.
 type HealthConfig struct {
-	Enabled       bool   `envconfig:"ENABLED" default:"true"`
-	Path          string `envconfig:"PATH" default:"/health"`
-	LivenessPath  string `envconfig:"LIVENESS_PATH" default:"/health/live"`
-	ReadinessPath string `envconfig:"READINESS_PATH" default:"/health/ready"`
+	LivenessPath  string        `envconfig:"LIVENESS_PATH" default:"/healthz"`
+	ReadinessPath string        `envconfig:"READINESS_PATH" default:"/readyz"`
+	Port          string        `envconfig:"PORT" default:"9090"`
+	Timeout       time.Duration `envconfig:"TIMEOUT" default:"2s" validate:"min=1s"`
 }
 
 // Load reads configuration from environment variables with the HEIMDALL prefix.
@@ -96,6 +96,10 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if err := c.Health.Validate(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -108,10 +112,10 @@ func (c *Config) LogConfig(log *slog.Logger) {
 		slog.String("log_level", c.App.LogLevel),
 		slog.String("log_format", c.App.LogFormat),
 		slog.Duration("shutdown_timeout", c.App.ShutdownTimeout),
+		slog.String("health_port", c.Health.Port),
 		slog.String("control_port", c.Server.Control.Port),
 		slog.String("data_port", c.Server.Data.Port),
 		slog.Bool("tls_enabled", c.Server.Control.TLSEnabled),
-		slog.Bool("health_enabled", c.Health.Enabled),
 		slog.Bool("db_configured", c.Database.IsConfigured()),
 		slog.Bool("redis_configured", c.Redis.IsConfigured()),
 	)
@@ -190,4 +194,12 @@ func parseAndValidateURL(rawURL string, allowedSchemes []string) (*url.URL, erro
 	}
 
 	return parsed, nil
+}
+
+// Validate checks HealthConfig fields for correctness.
+func (h *HealthConfig) Validate() error {
+	if err := validatePort(h.Port, "health"); err != nil {
+		return err
+	}
+	return nil
 }

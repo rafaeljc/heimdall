@@ -18,6 +18,7 @@ import (
 	"github.com/rafaeljc/heimdall/internal/config"
 	"github.com/rafaeljc/heimdall/internal/controlapi"
 	"github.com/rafaeljc/heimdall/internal/database"
+	"github.com/rafaeljc/heimdall/internal/health"
 	"github.com/rafaeljc/heimdall/internal/logger"
 	"github.com/rafaeljc/heimdall/internal/store"
 )
@@ -74,12 +75,11 @@ func run() error {
 	defer pgPool.Close()
 
 	// Initialize Redis Client
-	redisCache, err := cache.NewRedisCache(ctx, &cfg.Redis)
+	redisClient, err := cache.NewRedisClient(ctx, &cfg.Redis)
 	if err != nil {
 		return fmt.Errorf("failed to connect to redis: %w", err)
 	}
-	defer redisCache.Close()
-
+	defer redisClient.Close()
 	// -------------------------------------------------------------------------
 	// 2. Dependency Injection & Wiring
 	// -------------------------------------------------------------------------
@@ -88,9 +88,21 @@ func run() error {
 	// We pass the pgPool instance explicitly.
 	flagStore := store.NewPostgresStore(pgPool)
 
+	// We pass the redisClient instance explicitly.
+	redisCache := cache.NewRedisCache(redisClient)
+
 	// Layer 2: API (Controller)
 	// Inject the repository into the API handler with authentication enabled.
 	api := controlapi.NewAPI(flagStore, redisCache, apiKeyHash)
+
+	// Health Service Initialization
+	healthSvc := health.NewService(
+		log,
+		cfg,
+		health.NewPostgresChecker(pgPool),
+		health.NewRedisChecker(redisClient),
+	)
+	healthSvc.Start()
 
 	// -------------------------------------------------------------------------
 	// 3. HTTP Server Setup
@@ -146,6 +158,10 @@ func run() error {
 	// pending requests do not finish in time.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.App.ShutdownTimeout)
 	defer cancel()
+
+	if err := healthSvc.Stop(shutdownCtx); err != nil {
+		log.Warn("health service shutdown error", slog.String("error", err.Error()))
+	}
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("server forced to shutdown: %w", err)
