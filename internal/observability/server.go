@@ -11,7 +11,7 @@ import (
 // Server manages the observability endpoints (health checks and metrics).
 type Server struct {
 	logger   *slog.Logger
-	cfg      *config.Config
+	cfg      *config.ObservabilityConfig
 	router   *chi.Mux
 	server   *http.Server
 	checkers []Checker

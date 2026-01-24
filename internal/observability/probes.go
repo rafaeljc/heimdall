@@ -20,7 +20,7 @@ func (s *Server) liveness(w http.ResponseWriter, r *http.Request) {
 // Returns 200 OK only if all checkers pass. Used by Kubernetes to route traffic.
 func (s *Server) readiness(w http.ResponseWriter, r *http.Request) {
 	// Enforce the configured timeout to ensure we respond to Kubernetes in time.
-	ctx, cancel := context.WithTimeout(r.Context(), s.cfg.Health.Timeout)
+	ctx, cancel := context.WithTimeout(r.Context(), s.cfg.Timeout)
 	defer cancel()
 
 	statusMap := make(map[string]string)
