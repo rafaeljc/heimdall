@@ -21,8 +21,8 @@ import (
 	"github.com/rafaeljc/heimdall/internal/cache"
 	"github.com/rafaeljc/heimdall/internal/config"
 	"github.com/rafaeljc/heimdall/internal/dataapi"
-	"github.com/rafaeljc/heimdall/internal/health"
 	"github.com/rafaeljc/heimdall/internal/logger"
+	"github.com/rafaeljc/heimdall/internal/observability"
 	"github.com/rafaeljc/heimdall/internal/ruleengine"
 )
 
@@ -90,13 +90,13 @@ func run() error {
 		return fmt.Errorf("failed to initialize data api: %w", err)
 	}
 
-	// Health Service Initialization
-	healthSvc := health.NewService(
+	// Observability Server Initialization
+	obsServer := observability.NewServer(
 		log,
-		cfg,
-		health.NewRedisChecker(redisClient),
+		&cfg.Observability,
+		cache.NewHealthChecker(redisClient),
 	)
-	healthSvc.Start()
+	obsServer.Start()
 
 	// -------------------------------------------------------------------------
 	// 4. gRPC Server Setup
@@ -167,8 +167,8 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.App.ShutdownTimeout)
 	defer cancel()
 
-	if err := healthSvc.Stop(shutdownCtx); err != nil {
-		log.Warn("health service shutdown error", slog.String("error", err.Error()))
+	if err := obsServer.Shutdown(shutdownCtx); err != nil {
+		log.Warn("observability server shutdown error", slog.String("error", err.Error()))
 	}
 
 	select {

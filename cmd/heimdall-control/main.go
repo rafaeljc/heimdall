@@ -18,8 +18,8 @@ import (
 	"github.com/rafaeljc/heimdall/internal/config"
 	"github.com/rafaeljc/heimdall/internal/controlapi"
 	"github.com/rafaeljc/heimdall/internal/database"
-	"github.com/rafaeljc/heimdall/internal/health"
 	"github.com/rafaeljc/heimdall/internal/logger"
+	"github.com/rafaeljc/heimdall/internal/observability"
 	"github.com/rafaeljc/heimdall/internal/store"
 )
 
@@ -95,14 +95,14 @@ func run() error {
 	// Inject the repository into the API handler with authentication enabled.
 	api := controlapi.NewAPI(flagStore, redisCache, apiKeyHash)
 
-	// Health Service Initialization
-	healthSvc := health.NewService(
+	// Observability Server Initialization
+	obsServer := observability.NewServer(
 		log,
-		cfg,
-		health.NewPostgresChecker(pgPool),
-		health.NewRedisChecker(redisClient),
+		&cfg.Observability,
+		database.NewHealthChecker(pgPool),
+		cache.NewHealthChecker(redisClient),
 	)
-	healthSvc.Start()
+	obsServer.Start()
 
 	// -------------------------------------------------------------------------
 	// 3. HTTP Server Setup
@@ -159,8 +159,8 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.App.ShutdownTimeout)
 	defer cancel()
 
-	if err := healthSvc.Stop(shutdownCtx); err != nil {
-		log.Warn("health service shutdown error", slog.String("error", err.Error()))
+	if err := obsServer.Shutdown(shutdownCtx); err != nil {
+		log.Warn("observability server shutdown error", slog.String("error", err.Error()))
 	}
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
