@@ -129,14 +129,15 @@ export HEIMDALL_SERVER_CONTROL_TLS_KEY_FILE=/certs/tls.key
 | `HEIMDALL_SYNCER_BASE_RETRY_DELAY` | `1s` |
 | `HEIMDALL_SYNCER_HYDRATION_CONCURRENCY` | `10` |
 
-### Health Checks
+### Observability
 
 | Variable | Default |
 |----------|---------|
-| `HEIMDALL_HEALTH_LIVENESS_PATH` | `/healthz` |
-| `HEIMDALL_HEALTH_READINESS_PATH` | `/readyz` |
-| `HEIMDALL_HEALTH_PORT` | `9090` |
-| `HEIMDALL_HEALTH_TIMEOUT` | `2s` |
+| `HEIMDALL_OBSERVABILITY_PORT` | `9090` |
+| `HEIMDALL_OBSERVABILITY_TIMEOUT` | `5s` |
+| `HEIMDALL_OBSERVABILITY_LIVENESS_PATH` | `/healthz` |
+| `HEIMDALL_OBSERVABILITY_READINESS_PATH` | `/readyz` |
+| `HEIMDALL_OBSERVABILITY_METRICS_PATH` | `/metrics` |
 
 ## Production Requirements
 

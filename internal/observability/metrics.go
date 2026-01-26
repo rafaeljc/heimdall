@@ -5,6 +5,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
+// NOTE: Currently, all metrics are defined globally here.
+// This causes a harmless side-effect where a service (e.g., data-plane)
+// initializes metrics from other services (e.g., control-plane) with zero values.
+//
+// TODO(refactor): When the number of metrics grows significantly, split this
+// package into sub-packages (metrics/data, metrics/control) to isolate initialization.
+
 // namespace defines the global prefix for all metrics (e.g., heimdall_...).
 const namespace = "heimdall"
 

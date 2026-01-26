@@ -83,9 +83,15 @@ This will start:
 
 * PostgreSQL (Port 5432)
 * Redis (Port 6379)
-* Control Plane (Port 8080)
-* Data Plane (Port 50051)
+* Control Plane REST API (Port 8080)
+* Data Plane gRPC API (Port 50051)
 * Swagger UI (Port 8081)
+* Observability:
+   * Control Plane (Port 9090)
+   * Data Plane (Port 9091)
+   * Syncer (Port 9092)
+
+Each observability endpoint exposes liveness, readiness, and metrics endpoints for its respective service.
 
 ### Configuration
 
