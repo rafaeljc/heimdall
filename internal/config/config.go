@@ -22,12 +22,12 @@ const (
 
 // Config holds the complete application configuration.
 type Config struct {
-	App      AppConfig      `envconfig:"APP"`
-	Server   ServerConfig   `envconfig:"SERVER"`
-	Database DatabaseConfig `envconfig:"DB"`
-	Redis    RedisConfig    `envconfig:"REDIS"`
-	Syncer   SyncerConfig   `envconfig:"SYNCER"`
-	Health   HealthConfig   `envconfig:"HEALTH"`
+	App           AppConfig           `envconfig:"APP"`
+	Server        ServerConfig        `envconfig:"SERVER"`
+	Database      DatabaseConfig      `envconfig:"DB"`
+	Redis         RedisConfig         `envconfig:"REDIS"`
+	Syncer        SyncerConfig        `envconfig:"SYNCER"`
+	Observability ObservabilityConfig `envconfig:"OBSERVABILITY"`
 }
 
 // AppConfig contains core application settings.
@@ -44,14 +44,6 @@ type AppConfig struct {
 type ServerConfig struct {
 	Control ControlPlaneConfig `envconfig:"CONTROL"`
 	Data    DataPlaneConfig    `envconfig:"DATA"`
-}
-
-// HealthConfig configures health check endpoints.
-type HealthConfig struct {
-	LivenessPath  string        `envconfig:"LIVENESS_PATH" default:"/healthz"`
-	ReadinessPath string        `envconfig:"READINESS_PATH" default:"/readyz"`
-	Port          string        `envconfig:"PORT" default:"9090"`
-	Timeout       time.Duration `envconfig:"TIMEOUT" default:"2s" validate:"min=1s"`
 }
 
 // Load reads configuration from environment variables with the HEIMDALL prefix.
@@ -96,7 +88,7 @@ func (c *Config) Validate() error {
 		return err
 	}
 
-	if err := c.Health.Validate(); err != nil {
+	if err := c.Observability.Validate(); err != nil {
 		return err
 	}
 
@@ -112,7 +104,7 @@ func (c *Config) LogConfig(log *slog.Logger) {
 		slog.String("log_level", c.App.LogLevel),
 		slog.String("log_format", c.App.LogFormat),
 		slog.Duration("shutdown_timeout", c.App.ShutdownTimeout),
-		slog.String("health_port", c.Health.Port),
+		slog.String("observability_port", c.Observability.Port),
 		slog.String("control_port", c.Server.Control.Port),
 		slog.String("data_port", c.Server.Data.Port),
 		slog.Bool("tls_enabled", c.Server.Control.TLSEnabled),
@@ -194,12 +186,4 @@ func parseAndValidateURL(rawURL string, allowedSchemes []string) (*url.URL, erro
 	}
 
 	return parsed, nil
-}
-
-// Validate checks HealthConfig fields for correctness.
-func (h *HealthConfig) Validate() error {
-	if err := validatePort(h.Port, "health"); err != nil {
-		return err
-	}
-	return nil
 }

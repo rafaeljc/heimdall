@@ -13,8 +13,8 @@ import (
 	"github.com/rafaeljc/heimdall/internal/cache"
 	"github.com/rafaeljc/heimdall/internal/config"
 	"github.com/rafaeljc/heimdall/internal/database"
-	"github.com/rafaeljc/heimdall/internal/health"
 	"github.com/rafaeljc/heimdall/internal/logger"
+	"github.com/rafaeljc/heimdall/internal/observability"
 	"github.com/rafaeljc/heimdall/internal/store"
 	"github.com/rafaeljc/heimdall/internal/syncer"
 )
@@ -85,14 +85,14 @@ func run() error {
 		redisCache,
 	)
 
-	// Health Service Initialization
-	healthSvc := health.NewService(
+	// Observability Server Initialization
+	obsServer := observability.NewServer(
 		log,
-		cfg,
-		health.NewPostgresChecker(pgPool),
-		health.NewRedisChecker(redisClient),
+		&cfg.Observability,
+		database.NewHealthChecker(pgPool),
+		cache.NewHealthChecker(redisClient),
 	)
-	healthSvc.Start()
+	obsServer.Start()
 
 	// -------------------------------------------------------------------------
 	// 4. Execution & Graceful Shutdown
@@ -120,12 +120,12 @@ func run() error {
 		cancel() // Cancels the context passed to worker.Run(), stopping the loop
 	}
 
-	// Shutdown Health Service
+	// Shutdown Observability Server
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.App.ShutdownTimeout)
 	defer cancel()
 
-	if err := healthSvc.Stop(shutdownCtx); err != nil {
-		log.Warn("health service shutdown error", slog.String("error", err.Error()))
+	if err := obsServer.Shutdown(shutdownCtx); err != nil {
+		log.Warn("observability server shutdown error", slog.String("error", err.Error()))
 	}
 
 	// Give some time for cleanup if needed

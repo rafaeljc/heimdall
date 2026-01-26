@@ -18,8 +18,12 @@ tasks:
       # build ensures that if you change main.go, the image is recreated
       - docker compose up -d --build
       - echo "Heimdall environment is running!"
-      - echo "Control API at http://localhost:8080"
-      - echo "Swagger UI at http://localhost:8081"
+      - 'echo "Control API:         http://localhost:8080"'
+      - 'echo "Data Plane gRPC:     http://localhost:50051"'
+      - 'echo "Swagger UI:          http://localhost:8081"'
+      - 'echo "Observability (control): http://localhost:9090"'
+      - 'echo "Observability (data):    http://localhost:9091"'
+      - 'echo "Observability (syncer):  http://localhost:9092"'
 
   dev:down:
     desc: Stops the local environment (stops containers and removes networks)
