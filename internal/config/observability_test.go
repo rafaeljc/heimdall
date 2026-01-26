@@ -17,10 +17,10 @@ func TestObservabilityConfigEnvValidation(t *testing.T) {
 	}{
 		{
 			name: "Should load valid observability port and timeout",
-			envVars: map[string]string{
+			envVars: mergeEnvVars(map[string]string{
 				"HEIMDALL_OBSERVABILITY_PORT":    "9090",
 				"HEIMDALL_OBSERVABILITY_TIMEOUT": "1s",
-			},
+			}),
 			want: func(t *testing.T, cfg *Config) {
 				assert.Equal(t, "9090", cfg.Observability.Port)
 				assert.Equal(t, 1*time.Second, cfg.Observability.Timeout)
@@ -29,23 +29,23 @@ func TestObservabilityConfigEnvValidation(t *testing.T) {
 		},
 		{
 			name: "Should fail validation on port too low",
-			envVars: map[string]string{
+			envVars: mergeEnvVars(map[string]string{
 				"HEIMDALL_OBSERVABILITY_PORT": "0",
-			},
+			}),
 			wantErr: true,
 		},
 		{
 			name: "Should fail validation on port too high",
-			envVars: map[string]string{
+			envVars: mergeEnvVars(map[string]string{
 				"HEIMDALL_OBSERVABILITY_PORT": "65536",
-			},
+			}),
 			wantErr: true,
 		},
 		{
 			name: "Should fail validation on timeout too short",
-			envVars: map[string]string{
+			envVars: mergeEnvVars(map[string]string{
 				"HEIMDALL_OBSERVABILITY_TIMEOUT": "999ms",
-			},
+			}),
 			wantErr: true,
 		},
 	}

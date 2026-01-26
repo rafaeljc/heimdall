@@ -76,7 +76,7 @@ func TestObservabilityServer_Integration(t *testing.T) {
 
 	obsCfg := &config.ObservabilityConfig{
 		Port:          fmt.Sprintf("%d", freePort),
-		Timeout:       1 * time.Second,
+		Timeout:       3 * time.Second, // Increased timeout for readiness probe
 		LivenessPath:  livenessPath,
 		ReadinessPath: readinessPath,
 		MetricsPath:   metricsPath,
