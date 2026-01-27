@@ -111,10 +111,17 @@ func run() error {
 	}
 
 	// Define Server Options (Interceptors)
+	// Order matters in ChainUnaryInterceptor:
+	// 1. RequestLoggerInterceptor: Sets up Context (RequestID, Logger) & Logs outcome.
+	// 2. ObservabilityInterceptor: Measures metrics (Duration, Count).
+	//
+	// We want the logger outer-most to trace the entire request lifecycle,
+	// including any potential overhead from the observability layer itself.
 	opts := []grpc.ServerOption{
-		// Chain the logging interceptor.
-		// This generates the Request ID and injects the logger into the Context.
-		grpc.UnaryInterceptor(dataapi.RequestLoggerInterceptor()),
+		grpc.ChainUnaryInterceptor(
+			dataapi.RequestLoggerInterceptor(),
+			dataapi.ObservabilityInterceptor(),
+		),
 	}
 
 	// Initialize the gRPC Server

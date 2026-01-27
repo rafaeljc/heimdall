@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rafaeljc/heimdall/internal/logger"
+	"github.com/rafaeljc/heimdall/internal/observability"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -77,6 +78,64 @@ func RequestLoggerInterceptor() grpc.UnaryServerInterceptor {
 			slog.Duration("duration", duration),
 			slog.String("peer_addr", getPeerAddr(ctx)), // Helper optional
 		)
+
+		return resp, err
+	}
+}
+
+// ObservabilityInterceptor returns a UnaryServerInterceptor that collects RED metrics.
+// It acts as the telemetry middleware, measuring:
+// 1. Request Duration (Latency) -> heimdall_data_plane_grpc_handling_seconds
+// 2. Request Count (Traffic/Errors) -> heimdall_data_plane_grpc_requests_total
+//
+// SAFETY NOTE: This implementation uses 'GetMetricWithLabelValues' instead of 'WithLabelValues'.
+// The standard 'WithLabelValues' panics if the number of labels mismatches the definition.
+// In a critical Data Plane, we prefer to log a telemetry error rather than crashing the request handling.
+func ObservabilityInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		start := time.Now()
+
+		// Execute the handler
+		resp, err := handler(ctx, req)
+
+		// Metrics Calculation
+		duration := time.Since(start).Seconds()
+
+		// Extract gRPC Status Code safely
+		st, _ := status.FromError(err)
+		codeStr := st.Code().String()
+		method := info.FullMethod
+
+		// We retrieve the logger from context to ensure any telemetry errors
+		// are correlated with the Request ID.
+		log := logger.FromContext(ctx)
+
+		// ---------------------------------------------------------------------
+		// 1. Record Latency (Histogram)
+		// ---------------------------------------------------------------------
+		histObserver, metricErr := observability.DataPlaneGrpcDuration.GetMetricWithLabelValues(method, codeStr)
+		if metricErr != nil {
+			// Log telemetry error but DO NOT fail the request
+			log.Warn("observability: failed to record latency metric",
+				slog.String("error", metricErr.Error()),
+				slog.String("metric", "grpc_handling_seconds"),
+			)
+		} else {
+			histObserver.Observe(duration)
+		}
+
+		// ---------------------------------------------------------------------
+		// 2. Record Count (Counter)
+		// ---------------------------------------------------------------------
+		counter, metricErr := observability.DataPlaneGrpcTotal.GetMetricWithLabelValues(method, codeStr)
+		if metricErr != nil {
+			log.Warn("observability: failed to record request count metric",
+				slog.String("error", metricErr.Error()),
+				slog.String("metric", "grpc_requests_total"),
+			)
+		} else {
+			counter.Inc()
+		}
 
 		return resp, err
 	}
