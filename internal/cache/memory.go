@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/maypok86/otter"
+	"github.com/rafaeljc/heimdall/internal/observability"
 	"github.com/rafaeljc/heimdall/internal/ruleengine"
 )
 
@@ -17,12 +18,13 @@ type MemoryCache struct {
 // capacity: Max number of items (Hard Cap to prevent OOM).
 // ttl: Time-To-Live for items (Safety net for eventual consistency).
 func NewMemoryCache(capacity int, ttl time.Duration) (*MemoryCache, error) {
-	// otter.MustBuilder panics on error, so we use Builder to be safe if desired,
-	// but here we wrap it to return the error.
-	builder := otter.MustBuilder[string, *ruleengine.FeatureFlag](capacity).
-		WithTTL(ttl)
+	// We use the Builder pattern to construct the cache safely.
+	builder, err := otter.NewBuilder[string, *ruleengine.FeatureFlag](capacity)
+	if err != nil {
+		return nil, err
+	}
 
-	cache, err := builder.Build()
+	cache, err := builder.WithTTL(ttl).Build()
 	if err != nil {
 		return nil, err
 	}
@@ -33,8 +35,19 @@ func NewMemoryCache(capacity int, ttl time.Duration) (*MemoryCache, error) {
 // Get retrieves a flag from memory.
 // Returns the flag and a boolean indicating if it was found.
 // This operation is virtually lock-free and extremely fast.
+//
+// INSTRUMENTATION:
+// It increments prometheus counters for Cache Hits and Misses.
 func (c *MemoryCache) Get(key string) (*ruleengine.FeatureFlag, bool) {
-	return c.store.Get(key)
+	val, found := c.store.Get(key)
+
+	if found {
+		observability.DataPlaneCacheHits.Inc()
+	} else {
+		observability.DataPlaneCacheMisses.Inc()
+	}
+
+	return val, found
 }
 
 // Set adds or updates a flag in memory.
