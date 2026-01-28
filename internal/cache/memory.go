@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"time"
 
 	"github.com/maypok86/otter"
@@ -24,7 +25,13 @@ func NewMemoryCache(capacity int, ttl time.Duration) (*MemoryCache, error) {
 		return nil, err
 	}
 
-	cache, err := builder.WithTTL(ttl).Build()
+	// We must enable .CollectStats() to allow the async collector
+	// to retrieve eviction/ratio data. Otter disables this by default for raw speed.
+	cache, err := builder.
+		WithTTL(ttl).
+		CollectStats().
+		Build()
+
 	if err != nil {
 		return nil, err
 	}
@@ -65,4 +72,52 @@ func (c *MemoryCache) Del(key string) {
 // Close gracefully shuts down the cache and its background cleanup goroutines.
 func (c *MemoryCache) Close() {
 	c.store.Close()
+}
+
+// RunMetricsCollector runs a blocking background loop to update async cache metrics.
+// It is designed to be run in a separate goroutine controlled by the caller.
+//
+// Usage: `go memoryCache.RunMetricsCollector(ctx, 5*time.Second)`
+// If interval is <= 0, it defaults to 5 seconds.
+func (c *MemoryCache) RunMetricsCollector(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = 5 * time.Second // Sane default
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	// State variables to calculate deltas (Otter returns cumulative totals)
+	var lastEvicted int64
+	var lastRejected int64
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// Snapshot current stats
+			stats := c.store.Stats()
+
+			// 1. Gauge: Item Count
+			// Size() returns the item count (int), cast to float64 for Prometheus.
+			observability.DataPlaneCacheUsage.Set(float64(c.store.Size()))
+
+			// 2. Counter: Evictions (Delta Calculation)
+			// We calculate the difference since the last tick to feed the Counter.Add().
+			currentEvicted := stats.EvictedCount()
+			if delta := currentEvicted - lastEvicted; delta > 0 {
+				observability.DataPlaneCacheEvictions.Add(float64(delta))
+				lastEvicted = currentEvicted
+			}
+
+			// 3. Counter: Dropped/Rejected (Delta Calculation)
+			// Items rejected due to full buffers or policy limits.
+			currentRejected := stats.RejectedSets()
+			if delta := currentRejected - lastRejected; delta > 0 {
+				observability.DataPlaneCacheDropped.Add(float64(delta))
+				lastRejected = currentRejected
+			}
+		}
+	}
 }

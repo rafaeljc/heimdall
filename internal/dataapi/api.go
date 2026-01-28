@@ -68,9 +68,20 @@ func NewAPI(cfg *config.DataPlaneConfig, log *slog.Logger, l2 cache.Service, eng
 		cancel: cancel,
 	}
 
-	// Start Background Watcher
+	// -------------------------------------------------------------------------
+	// Background Tasks
+	// -------------------------------------------------------------------------
+
+	// 1. Start Pub/Sub Invalidation Watcher
 	api.wg.Add(1)
 	go api.watchUpdates()
+
+	// 2. Start Async Metrics Collector for L1 Cache
+	api.wg.Add(1)
+	go func() {
+		defer api.wg.Done()
+		api.l1.RunMetricsCollector(api.ctx, 0) // Default interval
+	}()
 
 	return api, nil
 }
