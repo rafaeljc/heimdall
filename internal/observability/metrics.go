@@ -67,7 +67,7 @@ var (
 		Help:      "Total gRPC evaluate requests",
 	}, []string{"method", "code"})
 
-	// --- Cache L1 Metrics (Ristretto) ---
+	// --- Cache L1 Metrics (Otter) ---
 
 	DataPlaneCacheHits = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: namespace,
