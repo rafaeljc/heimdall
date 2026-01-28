@@ -11,6 +11,7 @@ import (
 	"github.com/rafaeljc/heimdall/internal/cache"
 	"github.com/rafaeljc/heimdall/internal/config"
 	"github.com/rafaeljc/heimdall/internal/logger"
+	"github.com/rafaeljc/heimdall/internal/observability"
 	"github.com/rafaeljc/heimdall/internal/ruleengine"
 	pb "github.com/rafaeljc/heimdall/proto/heimdall/v1"
 	"google.golang.org/grpc"
@@ -110,6 +111,8 @@ func (a *API) Close() {
 	log.Info("api resources released")
 }
 
+// watchUpdates listens for cache invalidation events from the L2 provider (Redis).
+// When an event is received, it purges the key from L1 memory to ensure consistency.
 func (a *API) watchUpdates() {
 	defer a.wg.Done()
 
@@ -134,6 +137,8 @@ func (a *API) watchUpdates() {
 			// Reactive Invalidation: Remove from local memory.
 			// The next read will force a fetch from L2 cache (Redis).
 			a.l1.Del(key)
+			// Count invalidation events.
+			observability.DataPlaneInvalidations.Inc()
 			log.Debug("invalidated l1 cache key", slog.String("key", key))
 		}
 	}
