@@ -1,9 +1,11 @@
 package cache
 
 import (
+	"context"
 	"time"
 
 	"github.com/maypok86/otter"
+	"github.com/rafaeljc/heimdall/internal/observability"
 	"github.com/rafaeljc/heimdall/internal/ruleengine"
 )
 
@@ -17,12 +19,19 @@ type MemoryCache struct {
 // capacity: Max number of items (Hard Cap to prevent OOM).
 // ttl: Time-To-Live for items (Safety net for eventual consistency).
 func NewMemoryCache(capacity int, ttl time.Duration) (*MemoryCache, error) {
-	// otter.MustBuilder panics on error, so we use Builder to be safe if desired,
-	// but here we wrap it to return the error.
-	builder := otter.MustBuilder[string, *ruleengine.FeatureFlag](capacity).
-		WithTTL(ttl)
+	// We use the Builder pattern to construct the cache safely.
+	builder, err := otter.NewBuilder[string, *ruleengine.FeatureFlag](capacity)
+	if err != nil {
+		return nil, err
+	}
 
-	cache, err := builder.Build()
+	// We must enable .CollectStats() to allow the async collector
+	// to retrieve eviction/ratio data. Otter disables this by default for raw speed.
+	cache, err := builder.
+		WithTTL(ttl).
+		CollectStats().
+		Build()
+
 	if err != nil {
 		return nil, err
 	}
@@ -33,8 +42,19 @@ func NewMemoryCache(capacity int, ttl time.Duration) (*MemoryCache, error) {
 // Get retrieves a flag from memory.
 // Returns the flag and a boolean indicating if it was found.
 // This operation is virtually lock-free and extremely fast.
+//
+// INSTRUMENTATION:
+// It increments prometheus counters for Cache Hits and Misses.
 func (c *MemoryCache) Get(key string) (*ruleengine.FeatureFlag, bool) {
-	return c.store.Get(key)
+	val, found := c.store.Get(key)
+
+	if found {
+		observability.DataPlaneCacheHits.Inc()
+	} else {
+		observability.DataPlaneCacheMisses.Inc()
+	}
+
+	return val, found
 }
 
 // Set adds or updates a flag in memory.
@@ -52,4 +72,52 @@ func (c *MemoryCache) Del(key string) {
 // Close gracefully shuts down the cache and its background cleanup goroutines.
 func (c *MemoryCache) Close() {
 	c.store.Close()
+}
+
+// RunMetricsCollector runs a blocking background loop to update async cache metrics.
+// It is designed to be run in a separate goroutine controlled by the caller.
+//
+// Usage: `go memoryCache.RunMetricsCollector(ctx, 5*time.Second)`
+// If interval is <= 0, it defaults to 5 seconds.
+func (c *MemoryCache) RunMetricsCollector(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = 5 * time.Second // Sane default
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	// State variables to calculate deltas (Otter returns cumulative totals)
+	var lastEvicted int64
+	var lastRejected int64
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// Snapshot current stats
+			stats := c.store.Stats()
+
+			// 1. Gauge: Item Count
+			// Size() returns the item count (int), cast to float64 for Prometheus.
+			observability.DataPlaneCacheUsage.Set(float64(c.store.Size()))
+
+			// 2. Counter: Evictions (Delta Calculation)
+			// We calculate the difference since the last tick to feed the Counter.Add().
+			currentEvicted := stats.EvictedCount()
+			if delta := currentEvicted - lastEvicted; delta > 0 {
+				observability.DataPlaneCacheEvictions.Add(float64(delta))
+				lastEvicted = currentEvicted
+			}
+
+			// 3. Counter: Dropped/Rejected (Delta Calculation)
+			// Items rejected due to full buffers or policy limits.
+			currentRejected := stats.RejectedSets()
+			if delta := currentRejected - lastRejected; delta > 0 {
+				observability.DataPlaneCacheDropped.Add(float64(delta))
+				lastRejected = currentRejected
+			}
+		}
+	}
 }

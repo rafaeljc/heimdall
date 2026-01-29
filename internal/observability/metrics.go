@@ -67,7 +67,7 @@ var (
 		Help:      "Total gRPC evaluate requests",
 	}, []string{"method", "code"})
 
-	// --- Cache L1 Metrics (Ristretto) ---
+	// --- Cache L1 Metrics (Otter) ---
 
 	DataPlaneCacheHits = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: namespace,
@@ -92,12 +92,14 @@ var (
 		Help:      "Total items evicted due to memory pressure/MaxCost",
 	})
 
-	// DataPlaneCacheUsage tracks the current memory usage of the cache.
+	// Note: Changed from 'usage_bytes' to 'items_count'
+	// to reflect the capabilities of the S3-FIFO algorithm (Otter)
+	// which tracks item count efficiently, but not byte size.
 	DataPlaneCacheUsage = promauto.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Subsystem: "data_plane",
-		Name:      "l1_cache_usage_bytes",
-		Help:      "Current memory usage of the L1 cache in bytes",
+		Name:      "l1_cache_items_count",
+		Help:      "Current number of items in the L1 cache",
 	})
 
 	// DataPlaneCacheDropped tracks writes dropped because the buffer was full.
