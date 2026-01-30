@@ -33,7 +33,7 @@ var (
 		Name:      "http_handling_seconds",
 		Help:      "Time taken to handle HTTP requests in Control Plane",
 		Buckets:   prometheus.DefBuckets, // Standard buckets are fine for Admin APIs (human speed)
-	}, []string{"method", "path"})
+	}, []string{"method", "route"})
 
 	// ControlPlaneReqTotal counts the total number of HTTP requests.
 	// Metric: heimdall_control_plane_http_requests_total
@@ -42,7 +42,7 @@ var (
 		Subsystem: "control_plane",
 		Name:      "http_requests_total",
 		Help:      "Total HTTP requests in Control Plane",
-	}, []string{"method", "path", "code"})
+	}, []string{"method", "route", "code"})
 
 	// -------------------------------------------------------------------------
 	// DATA PLANE (gRPC + Cache)
