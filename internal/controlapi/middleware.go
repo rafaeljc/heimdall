@@ -6,11 +6,14 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/render"
 	"github.com/rafaeljc/heimdall/internal/logger"
+	"github.com/rafaeljc/heimdall/internal/observability"
 )
 
 // RequestLogger creates a middleware that handles structured logging for HTTP requests.
@@ -117,5 +120,49 @@ func (a *API) authenticateAPIKey(next http.Handler) http.Handler {
 
 		// Authentication successful, proceed to handler
 		next.ServeHTTP(w, r)
+	})
+}
+
+// ObservabilityMiddleware collects RED metrics (Rate, Errors, Duration) for HTTP requests.
+//
+// NOTE: Cardinality Protection
+// This middleware strictly relies on the Chi Router's normalized "Route Pattern" (e.g., "/flags/{key}")
+// instead of the raw URL path. This prevents high-cardinality issues in Prometheus caused by
+// dynamic IDs or malicious scanners probing random paths.
+func ObservabilityMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+
+		// Wrap ResponseWriter to capture the status code
+		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+
+		// Process the request
+		next.ServeHTTP(ww, r)
+
+		// --- Telemetry Logic ---
+
+		duration := time.Since(start).Seconds()
+		status := ww.Status()
+		statusStr := strconv.Itoa(status)
+
+		var routePattern string
+		rctx := chi.RouteContext(r.Context())
+
+		// 1. Business Context (High Priority):
+		// If Chi matched a route (e.g., "/flags/{key}"), use that pattern.
+		// This preserves visibility for cases where the route exists, but the resource (key) does not (404).
+		if rctx != nil && rctx.RoutePattern() != "" {
+			routePattern = rctx.RoutePattern()
+		} else {
+			// 2. Infrastructure Noise (Fallback):
+			// If no route was matched, it's likely a 404 for a non-existent path (e.g., /admin.php, /favicon.ico).
+			// We force "not_found" to prevent cardinality explosion from bots/scanners.
+			routePattern = "not_found"
+		}
+
+		// Record Metrics
+		// Labels must match definition in internal/observability/metrics.go
+		observability.ControlPlaneReqDuration.WithLabelValues(r.Method, routePattern).Observe(duration)
+		observability.ControlPlaneReqTotal.WithLabelValues(r.Method, routePattern, statusStr).Inc()
 	})
 }
