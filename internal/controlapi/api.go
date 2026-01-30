@@ -89,6 +89,9 @@ func (a *API) configureRoutes() {
 	a.Router.Use(middleware.RealIP)
 	// Logger: Logs request method, path, status, and duration.
 	a.Router.Use(RequestLogger)
+	// Observability: Captures RED metrics (Rate, Errors, Duration).
+	// Placed after Logger (to share request context) and before Recoverer.
+	a.Router.Use(ObservabilityMiddleware)
 	// Recoverer: Prevents the server from crashing on panics, returning 500 instead.
 	a.Router.Use(middleware.Recoverer)
 	// Content-Type: Forces JSON content type for API responses.
