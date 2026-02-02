@@ -185,7 +185,7 @@ func TestSyncerRaceCondition_Integration(t *testing.T) {
 		require.Equal(t, int64(5), flag.Version)
 
 		// Push version 5 update and wait for it to be processed
-		err := verifierClient.LPush(ctx, cache.UpdateQueueKey, cache.EncodeQueueMessage(flagKey, 5)).Err()
+		err := verifierClient.LPush(ctx, cache.UpdateQueueKey, cache.EncodeQueueMessage(flagKey, 5, 0)).Err()
 		require.NoError(t, err)
 
 		redisKey := fmt.Sprintf("heimdall:flag:%s", flagKey)
@@ -200,7 +200,7 @@ func TestSyncerRaceCondition_Integration(t *testing.T) {
 
 		// Now push stale updates (versions 2, 3, 4)
 		for v := int64(2); v <= 4; v++ {
-			err := verifierClient.LPush(ctx, cache.UpdateQueueKey, cache.EncodeQueueMessage(flagKey, v)).Err()
+			err := verifierClient.LPush(ctx, cache.UpdateQueueKey, cache.EncodeQueueMessage(flagKey, v, 0)).Err()
 			require.NoError(t, err)
 		}
 
@@ -272,7 +272,7 @@ func TestSyncerRaceCondition_Integration(t *testing.T) {
 		require.Equal(t, int64(3), flag.Version)
 
 		// Push version 3 update
-		err := verifierClient.LPush(ctx, cache.UpdateQueueKey, cache.EncodeQueueMessage(flagKey, 3)).Err()
+		err := verifierClient.LPush(ctx, cache.UpdateQueueKey, cache.EncodeQueueMessage(flagKey, 3, 0)).Err()
 		require.NoError(t, err)
 
 		// Assert: Version should be updated to 3
@@ -334,7 +334,7 @@ func TestSyncerRaceCondition_Integration(t *testing.T) {
 		require.Equal(t, int64(2), newVersion)
 
 		// Push delete update
-		err = verifierClient.LPush(ctx, cache.UpdateQueueKey, cache.EncodeQueueMessage(flagKey, newVersion)).Err()
+		err = verifierClient.LPush(ctx, cache.UpdateQueueKey, cache.EncodeQueueMessage(flagKey, newVersion, 0)).Err()
 		require.NoError(t, err)
 
 		// Assert: Flag should now be a tombstone in Redis (IsDeleted: true)
@@ -348,7 +348,7 @@ func TestSyncerRaceCondition_Integration(t *testing.T) {
 		}, 3*time.Second, 50*time.Millisecond)
 
 		// Now try to push an old version (version 1) - should be rejected
-		err = verifierClient.LPush(ctx, cache.UpdateQueueKey, cache.EncodeQueueMessage(flagKey, 1)).Err()
+		err = verifierClient.LPush(ctx, cache.UpdateQueueKey, cache.EncodeQueueMessage(flagKey, 1, 0)).Err()
 		require.NoError(t, err)
 
 		// Wait a bit for processing
@@ -407,7 +407,7 @@ func TestSyncerRaceCondition_Integration(t *testing.T) {
 		// Push updates out of order: 10, 3, 7, 2, 9, 4, 8, 5, 6
 		outOfOrderVersions := []int64{10, 3, 7, 2, 9, 4, 8, 5, 6}
 		for _, v := range outOfOrderVersions {
-			err := verifierClient.LPush(ctx, cache.UpdateQueueKey, cache.EncodeQueueMessage(flagKey, v)).Err()
+			err := verifierClient.LPush(ctx, cache.UpdateQueueKey, cache.EncodeQueueMessage(flagKey, v, 0)).Err()
 			require.NoError(t, err)
 		}
 
@@ -557,7 +557,7 @@ func TestSyncerRaceCondition_ConcurrentStress(t *testing.T) {
 					successfulUpdates.Add(1)
 
 					// Push update to queue
-					_ = verifierClient.LPush(ctx, cache.UpdateQueueKey, cache.EncodeQueueMessage(flagKey, updatedFlag.Version)).Err()
+					_ = verifierClient.LPush(ctx, cache.UpdateQueueKey, cache.EncodeQueueMessage(flagKey, updatedFlag.Version, 0)).Err()
 
 					// Small random delay
 					time.Sleep(time.Millisecond * time.Duration(j%5))
@@ -663,7 +663,7 @@ func TestSyncerRaceCondition_ConcurrentStress(t *testing.T) {
 					successfulUpdates.Add(1)
 
 					// Push update to queue
-					_ = verifierClient.LPush(ctx, cache.UpdateQueueKey, cache.EncodeQueueMessage(flagKey, updatedFlag.Version)).Err()
+					_ = verifierClient.LPush(ctx, cache.UpdateQueueKey, cache.EncodeQueueMessage(flagKey, updatedFlag.Version, 0)).Err()
 
 					// Small delay
 					time.Sleep(time.Millisecond * time.Duration(op%3))

@@ -94,7 +94,7 @@ func (s *Service) runConsumer(ctx context.Context) error {
 		default:
 		}
 
-		flagKey, queuedVersion, err := s.cache.WaitForUpdate(ctx, s.config.PopTimeout)
+		message, err := s.cache.WaitForUpdate(ctx, s.config.PopTimeout)
 
 		// Handle context cancellation
 		if ctx.Err() != nil {
@@ -110,16 +110,16 @@ func (s *Service) runConsumer(ctx context.Context) error {
 			continue
 		}
 
-		s.processEventWithRetry(ctx, flagKey, queuedVersion)
+		s.processEventWithRetry(ctx, message)
 	}
 }
 
 // processEventWithRetry processes a single flag update with retry logic.
-func (s *Service) processEventWithRetry(ctx context.Context, flagKey string, queuedVersion int64) {
-	s.logger.Info("processing update", slog.String("key", flagKey), slog.Int64("version", queuedVersion))
+func (s *Service) processEventWithRetry(ctx context.Context, message string) {
+	// Decode message to get flag key and version for processing
+	flagKey, queuedVersion, _ := cache.DecodeQueueMessage(message)
 
-	// Reconstruct message for ACK/DLQ operations
-	message := cache.EncodeQueueMessage(flagKey, queuedVersion)
+	s.logger.Info("processing update", slog.String("key", flagKey), slog.Int64("version", queuedVersion))
 
 	var err error
 	for i := 0; i <= s.config.MaxRetries; i++ {
