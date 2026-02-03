@@ -84,8 +84,8 @@ func (c *MemoryCache) RunMetricsCollector(ctx context.Context, interval time.Dur
 		interval = 5 * time.Second // Sane default
 	}
 
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
 
 	// State variables to calculate deltas (Otter returns cumulative totals)
 	var lastEvicted int64
@@ -95,7 +95,7 @@ func (c *MemoryCache) RunMetricsCollector(ctx context.Context, interval time.Dur
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			// Snapshot current stats
 			stats := c.store.Stats()
 
@@ -118,6 +118,8 @@ func (c *MemoryCache) RunMetricsCollector(ctx context.Context, interval time.Dur
 				observability.DataPlaneCacheDropped.Add(float64(delta))
 				lastRejected = currentRejected
 			}
+
+			timer.Reset(interval)
 		}
 	}
 }
