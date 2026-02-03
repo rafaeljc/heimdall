@@ -90,9 +90,10 @@ type Service interface {
 
 	// Queue
 	PublishUpdate(ctx context.Context, flagKey string, version int64) error
-	WaitForUpdate(ctx context.Context, timeout time.Duration) (string, int64, error)
+	WaitForUpdate(ctx context.Context, timeout time.Duration) (string, error)
 	AckUpdate(ctx context.Context, message string) error
 	MoveToDLQ(ctx context.Context, message string) error
+	QueueLen(ctx context.Context) (int64, error)
 
 	// Pub/Sub (Real-time Invalidation)
 	// BroadcastUpdate notifies all Data Plane instances to invalidate their L1.
@@ -178,24 +179,24 @@ func (c *RedisCache) DeleteFlag(ctx context.Context, key string) error {
 
 // PublishUpdate adds a flag update message to the queue in format "flagKey:version".
 func (c *RedisCache) PublishUpdate(ctx context.Context, flagKey string, version int64) error {
-	message := EncodeQueueMessage(flagKey, version)
+	enqueued_at := time.Now().UnixMilli()
+	message := EncodeQueueMessage(flagKey, version, enqueued_at)
 	return c.client.LPush(ctx, UpdateQueueKey, message).Err()
 }
 
 // WaitForUpdate blocks until a flag update is available in the queue.
-// Returns the flag key, version, and any error. Format: "flagKey:version".
-func (c *RedisCache) WaitForUpdate(ctx context.Context, timeout time.Duration) (string, int64, error) {
+// Returns the flag key, version, enqueued_at, and any error. Format: "flagKey:version:enqueued_at".
+func (c *RedisCache) WaitForUpdate(ctx context.Context, timeout time.Duration) (string, error) {
 	// BLMOVE atomically moves from Updates queue to Processing queue
 	message, err := c.client.BLMove(ctx, UpdateQueueKey, ProcessingQueueKey, "RIGHT", "LEFT", timeout).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
-			return "", 0, ErrQueueTimeout
+			return "", ErrQueueTimeout
 		}
-		return "", 0, err
+		return "", err
 	}
 
-	flagKey, version := DecodeQueueMessage(message)
-	return flagKey, version, nil
+	return message, nil
 }
 
 // AckUpdate removes a message from the processing queue after successful processing.
@@ -211,6 +212,15 @@ func (c *RedisCache) MoveToDLQ(ctx context.Context, message string) error {
 		return err
 	}
 	return c.client.LPush(ctx, DLQKey, message).Err()
+}
+
+// QueueLen returns the current number of pending update messages in the queue.
+func (c *RedisCache) QueueLen(ctx context.Context) (int64, error) {
+	count, err := c.client.LLen(ctx, UpdateQueueKey).Result()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get queue length from redis: %w", err)
+	}
+	return count, nil
 }
 
 // BroadcastUpdate publishes an invalidation event to all Data Plane pods.
@@ -300,34 +310,61 @@ func decodeFlag(value string) string {
 	return value[pipePos+1:]
 }
 
-// EncodeQueueMessage encodes a flag key and version into queue message format: "flagKey:version"
-func EncodeQueueMessage(flagKey string, version int64) string {
+// EncodeQueueMessage encodes a flag key, version and enqueued_at into queue message format: "flagKey:version:enqueued_at"
+func EncodeQueueMessage(flagKey string, version, enqueued_at int64) string {
 	var buf strings.Builder
-	buf.Grow(len(flagKey) + 20) // flagKey + colon + version (max 20 digits)
+	// Capacity: key length + 1 (:) + 20 (max int64 chars) + 1 (:) + 20 (max int64 chars)
+	buf.Grow(len(flagKey) + 42)
 	buf.WriteString(flagKey)
 	buf.WriteByte(':')
 	buf.WriteString(strconv.FormatInt(version, 10))
+	buf.WriteByte(':')
+	buf.WriteString(strconv.FormatInt(enqueued_at, 10))
 	return buf.String()
 }
 
-// DecodeQueueMessage extracts the flag key and version from queue message format: "flagKey:version"
-// Returns the flag key and version. If parsing fails, returns the original string as key and version 0.
-func DecodeQueueMessage(message string) (string, int64) {
-	// Find the last colon to handle flag keys that might contain colons
-	colonPos := strings.LastIndexByte(message, ':')
-	if colonPos == -1 {
-		return message, 0 // Fallback for legacy format (just key)
+// DecodeQueueMessage extracts the flag key, version and enqueued_at from queue message format: "flagKey:version:enqueued_at"
+// Returns the flag key, version and enqueued_at. If parsing fails, returns zero values for the failing components.
+func DecodeQueueMessage(message string) (string, int64, int64) {
+	// 1. Find the last colon (End of Version, Start of enqueued_at)
+	lastColon := strings.LastIndexByte(message, ':')
+	if lastColon == -1 {
+		// Format is likely "key" (invalid)
+		return message, 0, 0
 	}
 
-	flagKey := message[:colonPos]
-	versionStr := message[colonPos+1:]
+	// 2. Find the second to last colon (End of Key, Start of Version)
+	// We search in the substring before the last colon.
+	secondLastColon := strings.LastIndexByte(message[:lastColon], ':')
+	if secondLastColon == -1 {
+		// Means we only found one colon total.
+		// Format is likely "key:ver" (invalid).
+		// We return key and attempt to parse the rest as version.
+		flagKey := message[:lastColon]
+		version, err := strconv.ParseInt(message[lastColon+1:], 10, 64)
+		if err != nil {
+			version = 0
+		}
+		return flagKey, version, 0
+	}
 
-	version, err := strconv.ParseInt(versionStr, 10, 64)
+	// 3. Extract components
+	// Slicing message[i:j] shares the underlying array, so no byte allocation.
+	flagKey := message[:secondLastColon]
+	verStr := message[secondLastColon+1 : lastColon]
+	enqueuedAtStr := message[lastColon+1:]
+
+	version, err := strconv.ParseInt(verStr, 10, 64)
 	if err != nil {
-		return message, 0 // Fallback if version is invalid
+		version = 0
 	}
 
-	return flagKey, version
+	enqueued_at, err := strconv.ParseInt(enqueuedAtStr, 10, 64)
+	if err != nil {
+		enqueued_at = 0
+	}
+
+	return flagKey, version, enqueued_at
 }
 
 // DecodeFlagForTest is a test helper that extracts the JSON portion from Redis storage.

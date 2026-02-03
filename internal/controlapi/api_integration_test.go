@@ -125,16 +125,16 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 				return false
 			}
 
-			// Pop message and decode it (format: "flagKey:version")
+			// Pop message and decode it (format: "flagKey:version:enqueued_at")
 			val, err := verifierClient.LPop(ctx, "heimdall:queue:updates").Result()
 			if err != nil {
 				return false
 			}
 
-			// Verify message format using encode function
+			// Verify message format using decode function
 			// For newly created flag, version is 1
-			expectedMessage := cache.EncodeQueueMessage(key, 1)
-			return val == expectedMessage
+			decodedKey, decodedVersion, _ := cache.DecodeQueueMessage(val)
+			return decodedKey == key && decodedVersion == 1
 		}, 2*time.Second, 100*time.Millisecond, "Flag key with version must appear in Redis update queue")
 	})
 
@@ -626,10 +626,10 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 				return false
 			}
 
-			// Verify message format using encode function
+			// Verify message format using decode function
 			// Delete increments version to 2
-			expectedMessage := cache.EncodeQueueMessage(key, 2)
-			return val == expectedMessage
+			decodedKey, decodedVersion, _ := cache.DecodeQueueMessage(val)
+			return decodedKey == key && decodedVersion == 2
 		}, 2*time.Second, 100*time.Millisecond, "Flag key with version must appear in Redis update queue")
 	})
 
@@ -843,10 +843,10 @@ func TestControlPlaneAPI_Integration(t *testing.T) {
 				return false
 			}
 
-			// Verify message format using encode function
+			// Verify message format using decode function
 			// Update increments version to 2
-			expectedMessage := cache.EncodeQueueMessage(key, 2)
-			return val == expectedMessage
+			decodedKey, decodedVersion, _ := cache.DecodeQueueMessage(val)
+			return decodedKey == key && decodedVersion == 2
 		}, 2*time.Second, 100*time.Millisecond, "Flag key with version must appear in Redis update queue")
 	})
 

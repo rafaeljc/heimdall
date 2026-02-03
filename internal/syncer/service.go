@@ -12,6 +12,7 @@ import (
 
 	"github.com/rafaeljc/heimdall/internal/cache"
 	"github.com/rafaeljc/heimdall/internal/config"
+	"github.com/rafaeljc/heimdall/internal/observability"
 	"github.com/rafaeljc/heimdall/internal/ruleengine"
 	"github.com/rafaeljc/heimdall/internal/store"
 )
@@ -55,8 +56,24 @@ func (s *Service) Run(ctx context.Context) error {
 	// 2. Start Watchdog
 	go s.runWatchdog(ctx)
 
-	// 3. Start Consumer
+	// 3. Start Queue Monitor
+	go s.runQueueMonitor(ctx, 0) // Default interval
+
+	// 4. Start Consumer
 	return s.runConsumer(ctx)
+}
+
+// RunQueueMonitorOnly starts only the queue monitor for testing purposes.
+// This is useful for testing the queue monitoring and metrics collection
+// without running the full synchronization pipeline.
+// If interval is <= 0, it defaults to 5 seconds.
+func (s *Service) RunQueueMonitorOnly(ctx context.Context, interval time.Duration) error {
+	s.logger.Info("starting syncer service in queue monitor only mode")
+
+	// Run only the queue monitor
+	go s.runQueueMonitor(ctx, interval)
+
+	return nil
 }
 
 // runWatchdog periodically checks if the cache is hydrated and triggers hydration if needed.
@@ -83,6 +100,35 @@ func (s *Service) runWatchdog(ctx context.Context) {
 	}
 }
 
+// runQueueMonitor monitors the Redis queue depth for backpressure.
+// It is designed to be run in a separate goroutine controlled by the caller.
+//
+// Usage: `go memoryCache.RunMetricsCollector(ctx, 5*time.Second)`
+// If interval is <= 0, it defaults to 5 seconds.
+func (s *Service) runQueueMonitor(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = 5 * time.Second // Sane default
+	}
+
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			count, err := s.cache.QueueLen(ctx)
+			if err != nil {
+				s.logger.Error("failed to get queue depth", slog.String("error", err.Error()))
+			} else {
+				observability.RedisQueueDepth.Set(float64(count))
+			}
+			timer.Reset(interval)
+		}
+	}
+}
+
 // runConsumer processes update events from the cache queue.
 func (s *Service) runConsumer(ctx context.Context) error {
 	s.logger.Info("entering event loop", slog.String("queue", cache.UpdateQueueKey))
@@ -94,7 +140,7 @@ func (s *Service) runConsumer(ctx context.Context) error {
 		default:
 		}
 
-		flagKey, queuedVersion, err := s.cache.WaitForUpdate(ctx, s.config.PopTimeout)
+		message, err := s.cache.WaitForUpdate(ctx, s.config.PopTimeout)
 
 		// Handle context cancellation
 		if ctx.Err() != nil {
@@ -110,20 +156,21 @@ func (s *Service) runConsumer(ctx context.Context) error {
 			continue
 		}
 
-		s.processEventWithRetry(ctx, flagKey, queuedVersion)
+		s.processEventWithRetry(ctx, message)
 	}
 }
 
 // processEventWithRetry processes a single flag update with retry logic.
-func (s *Service) processEventWithRetry(ctx context.Context, flagKey string, queuedVersion int64) {
-	s.logger.Info("processing update", slog.String("key", flagKey), slog.Int64("version", queuedVersion))
+func (s *Service) processEventWithRetry(ctx context.Context, message string) {
+	// Decode message to get flag key and version for processing
+	flagKey, queuedVersion, enqueuedAt := cache.DecodeQueueMessage(message)
 
-	// Reconstruct message for ACK/DLQ operations
-	message := cache.EncodeQueueMessage(flagKey, queuedVersion)
+	s.logger.Info("processing update", slog.String("key", flagKey), slog.Int64("version", queuedVersion))
 
 	var err error
 	for i := 0; i <= s.config.MaxRetries; i++ {
 		if err = s.syncSingleFlag(ctx, flagKey, queuedVersion); err == nil {
+			s.recordJobMetrics("success", enqueuedAt)
 			if ackErr := s.cache.AckUpdate(ctx, message); ackErr != nil {
 				s.logger.Error("failed to ack update", slog.String("key", flagKey), slog.String("error", ackErr.Error()))
 			}
@@ -143,6 +190,20 @@ func (s *Service) processEventWithRetry(ctx context.Context, flagKey string, que
 	s.logger.Error("max retries reached, moving to DLQ", slog.String("key", flagKey))
 	if dlqErr := s.cache.MoveToDLQ(ctx, message); dlqErr != nil {
 		s.logger.Error("CRITICAL: failed to move to DLQ", slog.String("key", flagKey), slog.String("error", dlqErr.Error()))
+		s.recordJobMetrics("failure", enqueuedAt)
+	} else {
+		s.recordJobMetrics("dlq", enqueuedAt)
+	}
+}
+
+// recordJobMetrics handles the final observation of metrics
+func (s *Service) recordJobMetrics(status string, enqueuedAt int64) {
+	observability.SyncerJobsTotal.WithLabelValues(status).Inc()
+
+	if enqueuedAt > 0 {
+		// Latency = (Time inside Queue) + (Processing Time + Retries)
+		latency := time.Since(time.UnixMilli(enqueuedAt)).Seconds()
+		observability.SyncerJobDuration.Observe(latency)
 	}
 }
 

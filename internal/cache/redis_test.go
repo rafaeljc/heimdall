@@ -152,34 +152,39 @@ func TestEncodeQueueMessage(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		flagKey  string
-		version  int64
-		expected string
+		name        string
+		flagKey     string
+		version     int64
+		enqueued_at int64
+		expected    string
 	}{
 		{
-			name:     "happy path",
-			flagKey:  "feature-flag-123",
-			version:  42,
-			expected: "feature-flag-123:42",
+			name:        "happy path",
+			flagKey:     "feature-flag-123",
+			version:     42,
+			enqueued_at: 1000000,
+			expected:    "feature-flag-123:42:1000000",
 		},
 		{
-			name:     "large version (max int64)",
-			flagKey:  "my-flag",
-			version:  9223372036854775807,
-			expected: "my-flag:9223372036854775807",
+			name:        "large version (max int64)",
+			flagKey:     "my-flag",
+			version:     9223372036854775807,
+			enqueued_at: 2000000,
+			expected:    "my-flag:9223372036854775807:2000000",
 		},
 		{
-			name:     "version zero",
-			flagKey:  "test-flag",
-			version:  0,
-			expected: "test-flag:0",
+			name:        "version zero",
+			flagKey:     "test-flag",
+			version:     0,
+			enqueued_at: 3000000,
+			expected:    "test-flag:0:3000000",
 		},
 		{
-			name:     "empty flag key",
-			flagKey:  "",
-			version:  1,
-			expected: ":1",
+			name:        "empty flag key",
+			flagKey:     "",
+			version:     1,
+			enqueued_at: 4000000,
+			expected:    ":1:4000000",
 		},
 	}
 
@@ -188,7 +193,7 @@ func TestEncodeQueueMessage(t *testing.T) {
 			t.Parallel()
 
 			// Act
-			result := EncodeQueueMessage(tt.flagKey, tt.version)
+			result := EncodeQueueMessage(tt.flagKey, tt.version, tt.enqueued_at)
 
 			// Assert
 			assert.Equal(t, tt.expected, result)
@@ -204,77 +209,87 @@ func TestDecodeQueueMessage(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name            string
-		message         string
-		expectedKey     string
-		expectedVersion int64
+		name               string
+		message            string
+		expectedKey        string
+		expectedVersion    int64
+		expectedEnqueuedAt int64
 	}{
 		{
-			name:            "happy path",
-			message:         "feature-flag-123:42",
-			expectedKey:     "feature-flag-123",
-			expectedVersion: 42,
+			name:               "happy path",
+			message:            "feature-flag-123:42:1000000",
+			expectedKey:        "feature-flag-123",
+			expectedVersion:    42,
+			expectedEnqueuedAt: 1000000,
 		},
 		{
-			name:            "large version (max int64)",
-			message:         "my-flag:9223372036854775807",
-			expectedKey:     "my-flag",
-			expectedVersion: 9223372036854775807,
+			name:               "large version (max int64)",
+			message:            "my-flag:9223372036854775807:2000000",
+			expectedKey:        "my-flag",
+			expectedVersion:    9223372036854775807,
+			expectedEnqueuedAt: 2000000,
 		},
 		{
-			name:            "version zero",
-			message:         "test-flag:0",
-			expectedKey:     "test-flag",
-			expectedVersion: 0,
+			name:               "version zero",
+			message:            "test-flag:0:3000000",
+			expectedKey:        "test-flag",
+			expectedVersion:    0,
+			expectedEnqueuedAt: 3000000,
 		},
 		{
-			name:            "legacy format without version",
-			message:         "feature-flag-old",
-			expectedKey:     "feature-flag-old",
-			expectedVersion: 0,
+			name:               "legacy format without version",
+			message:            "feature-flag-old",
+			expectedKey:        "feature-flag-old",
+			expectedVersion:    0,
+			expectedEnqueuedAt: 0,
 		},
 		{
-			name:            "invalid version format (fallback)",
-			message:         "flag:not-a-number",
-			expectedKey:     "flag:not-a-number",
-			expectedVersion: 0,
+			name:               "invalid version format (fallback)",
+			message:            "flag:not-a-number",
+			expectedKey:        "flag",
+			expectedVersion:    0,
+			expectedEnqueuedAt: 0,
 		},
 		{
-			name:            "empty message",
-			message:         "",
-			expectedKey:     "",
-			expectedVersion: 0,
+			name:               "empty message",
+			message:            "",
+			expectedKey:        "",
+			expectedVersion:    0,
+			expectedEnqueuedAt: 0,
 		},
 		{
-			name:            "only colon",
-			message:         ":",
-			expectedKey:     ":",
-			expectedVersion: 0,
+			name:               "only colon",
+			message:            ":",
+			expectedKey:        "",
+			expectedVersion:    0,
+			expectedEnqueuedAt: 0,
 		},
 		{
-			name:            "empty key with valid version",
-			message:         ":123",
-			expectedKey:     "",
-			expectedVersion: 123,
+			name:               "empty key with valid version",
+			message:            ":123",
+			expectedKey:        "",
+			expectedVersion:    123,
+			expectedEnqueuedAt: 0,
 		},
 		{
-			name:            "version overflow (fallback)",
-			message:         "flag:99999999999999999999999",
-			expectedKey:     "flag:99999999999999999999999",
-			expectedVersion: 0,
+			name:               "version overflow (fallback)",
+			message:            "flag:99999999999999999999999",
+			expectedKey:        "flag",
+			expectedVersion:    0,
+			expectedEnqueuedAt: 0,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-
 			// Act
-			flagKey, version := DecodeQueueMessage(tt.message)
+			flagKey, version, enqueuedAt := DecodeQueueMessage(tt.message)
 
 			// Assert
 			assert.Equal(t, tt.expectedKey, flagKey)
 			assert.Equal(t, tt.expectedVersion, version)
+			assert.Equal(t, tt.expectedEnqueuedAt, enqueuedAt)
 		})
 	}
 }
@@ -367,12 +382,13 @@ func TestRoundTrip_QueueMessageEncoding(t *testing.T) {
 			t.Parallel()
 
 			// Act
-			encoded := EncodeQueueMessage(tt.flagKey, tt.version)
-			decodedKey, decodedVersion := DecodeQueueMessage(encoded)
+			encoded := EncodeQueueMessage(tt.flagKey, tt.version, 1234567)
+			decodedKey, decodedVersion, decodedEnqueuedAt := DecodeQueueMessage(encoded)
 
 			// Assert
 			assert.Equal(t, tt.flagKey, decodedKey, "decoded flag key should match original")
 			assert.Equal(t, tt.version, decodedVersion, "decoded version should match original")
+			assert.Equal(t, int64(1234567), decodedEnqueuedAt, "decoded enqueued_at should match original")
 		})
 	}
 }
@@ -415,26 +431,29 @@ func TestEncodeDecodeQueueMessage_PropertyAlwaysRecoverable(t *testing.T) {
 	// should return the original values
 
 	testCases := []struct {
-		flagKey string
-		version int64
+		flagKey     string
+		version     int64
+		enqueued_at int64
 	}{
-		{"simple", 1},
-		{"with-dashes", 100},
-		{"with_underscores", 42},
-		{"namespace:feature:flag", 5},
-		{"MixedCase123", 9223372036854775807},
-		{"", 1}, // Edge case: empty key
-		{"flag", 0},
-		{"flag", -1},
+		{"simple", 1, 1000000},
+		{"with-dashes", 100, 2000000},
+		{"with_underscores", 42, 3000000},
+		{"namespace:feature:flag", 5, 4000000},
+		{"MixedCase123", 9223372036854775807, 5000000},
+		{"", 1, 6000000}, // Edge case: empty key
+		{"flag", 0, 7000000},
+		{"flag", -1, 8000000},
 	}
 
 	for _, tc := range testCases {
-		encoded := EncodeQueueMessage(tc.flagKey, tc.version)
-		decodedKey, decodedVersion := DecodeQueueMessage(encoded)
+		encoded := EncodeQueueMessage(tc.flagKey, tc.version, tc.enqueued_at)
+		decodedKey, decodedVersion, decodedEnqueuedAt := DecodeQueueMessage(encoded)
 
 		require.Equal(t, tc.flagKey, decodedKey,
 			"Flag key mismatch for key=%s, version=%d", tc.flagKey, tc.version)
 		require.Equal(t, tc.version, decodedVersion,
 			"Version mismatch for key=%s, version=%d", tc.flagKey, tc.version)
+		require.Equal(t, tc.enqueued_at, decodedEnqueuedAt,
+			"Enqueued_at mismatch for key=%s, version=%d", tc.flagKey, tc.version)
 	}
 }

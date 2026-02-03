@@ -137,7 +137,7 @@ var (
 		Subsystem: "syncer",
 		Name:      "jobs_total",
 		Help:      "Total propagation jobs processed",
-	}, []string{"status"}) // success, fail
+	}, []string{"status"}) // success, dlq, failure
 
 	RedisQueueDepth = promauto.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace,
