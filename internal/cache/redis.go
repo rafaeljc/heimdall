@@ -8,12 +8,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/rafaeljc/heimdall/internal/logger"
+	"github.com/rafaeljc/heimdall/internal/observability"
 	"github.com/rafaeljc/heimdall/internal/ruleengine"
 )
 
@@ -123,6 +126,68 @@ func NewRedisCache(client *redis.Client) *RedisCache {
 	return &RedisCache{
 		client: client,
 		script: redis.NewScript(optimisticSetScript),
+	}
+}
+
+// RunPoolMonitor periodically records Redis connection pool statistics to Prometheus.
+// It tracks pool usage, hits, misses, and timeouts to detect exhaustion or configuration issues.
+// This function blocks until ctx is canceled, so it should be run in a goroutine.
+//
+// Usage: go cache.RunPoolMonitor(ctx, client, 10*time.Second)
+func RunPoolMonitor(ctx context.Context, client *redis.Client, interval time.Duration) {
+	log := logger.FromContext(ctx).With(slog.String("component", "redis_monitor"))
+	log.Info("starting redis pool monitor", slog.Duration("interval", interval))
+
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+
+	// Capture initial state to calculate deltas correctly
+	initialStats := client.PoolStats()
+	prevHits := initialStats.Hits
+	prevMisses := initialStats.Misses
+	prevTimeouts := initialStats.Timeouts
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("stopping redis pool monitor")
+			return
+		case <-timer.C:
+			stats := client.PoolStats()
+
+			// 1. Update Gauges (Absolute State)
+			// Labels: state (idle, total, stale)
+			observability.RedisPoolConnections.WithLabelValues("total").Set(float64(stats.TotalConns))
+			observability.RedisPoolConnections.WithLabelValues("idle").Set(float64(stats.IdleConns))
+			observability.RedisPoolConnections.WithLabelValues("stale").Set(float64(stats.StaleConns))
+
+			// 2. Update Counters (Cumulative Deltas)
+			// Redis PoolStats are cumulative, Prometheus expects delta adds.
+
+			// Pool Hits (Reuse)
+			if stats.Hits > prevHits {
+				delta := float64(stats.Hits - prevHits)
+				observability.RedisPoolHits.Add(delta)
+				prevHits = stats.Hits
+			}
+
+			// Pool Misses (New Connections)
+			if stats.Misses > prevMisses {
+				delta := float64(stats.Misses - prevMisses)
+				observability.RedisPoolMisses.Add(delta)
+				prevMisses = stats.Misses
+			}
+
+			// Pool Timeouts (Failures)
+			if stats.Timeouts > prevTimeouts {
+				delta := float64(stats.Timeouts - prevTimeouts)
+				observability.RedisPoolTimeouts.Add(delta)
+				prevTimeouts = stats.Timeouts
+			}
+
+			// Reset timer for next interval
+			timer.Reset(interval)
+		}
 	}
 }
 
