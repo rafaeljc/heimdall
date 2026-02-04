@@ -123,7 +123,7 @@ func TestSyncer_Metrics_Integration(t *testing.T) {
 		require.Equal(t, int64(3), initialDepth, "Queue should have 3 messages initially")
 
 		// Run queue monitor - should repeatedly record queue depth metric
-		_ = svc.RunQueueMonitorOnly(monitorCtx, 100*time.Millisecond)
+		go svc.RunQueueMonitor(monitorCtx, 100*time.Millisecond)
 
 		// Wait for monitor to finish
 		<-monitorCtx.Done()
