@@ -43,7 +43,7 @@ func TestMemoryCache_Metrics(t *testing.T) {
 		ctx := t.Context()
 
 		// Start collector with fast tick (10ms)
-		go c.RunMetricsCollector(ctx, 10*time.Millisecond)
+		go c.RunMetricsMonitor(ctx, 10*time.Millisecond)
 
 		t.Run("reflects items usage", func(t *testing.T) {
 			// Populate some items

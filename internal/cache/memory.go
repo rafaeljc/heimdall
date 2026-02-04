@@ -2,9 +2,11 @@ package cache
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/maypok86/otter"
+	"github.com/rafaeljc/heimdall/internal/logger"
 	"github.com/rafaeljc/heimdall/internal/observability"
 	"github.com/rafaeljc/heimdall/internal/ruleengine"
 )
@@ -74,15 +76,15 @@ func (c *MemoryCache) Close() {
 	c.store.Close()
 }
 
-// RunMetricsCollector runs a blocking background loop to update async cache metrics.
+// RunMetricsMonitor runs a blocking background loop to update async cache metrics.
 // It is designed to be run in a separate goroutine controlled by the caller.
 //
-// Usage: `go memoryCache.RunMetricsCollector(ctx, 5*time.Second)`
-// If interval is <= 0, it defaults to 5 seconds.
-func (c *MemoryCache) RunMetricsCollector(ctx context.Context, interval time.Duration) {
-	if interval <= 0 {
-		interval = 5 * time.Second // Sane default
-	}
+// Usage:
+// cache := NewMemoryCache(...)
+// go cache.RunMetricsMonitor(ctx, 5*time.Second)
+func (c *MemoryCache) RunMetricsMonitor(ctx context.Context, interval time.Duration) {
+	log := logger.FromContext(ctx).With(slog.String("component", "cache_monitor"))
+	log.Info("starting cache monitor", slog.Duration("interval", interval))
 
 	timer := time.NewTimer(interval)
 	defer timer.Stop()

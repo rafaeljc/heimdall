@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/rafaeljc/heimdall/internal/cache"
 	"github.com/rafaeljc/heimdall/internal/config"
@@ -81,7 +82,7 @@ func NewAPI(cfg *config.DataPlaneConfig, log *slog.Logger, l2 cache.Service, eng
 	api.wg.Add(1)
 	go func() {
 		defer api.wg.Done()
-		api.l1.RunMetricsCollector(api.ctx, 0) // Default interval
+		api.l1.RunMetricsMonitor(api.ctx, 5*time.Second)
 	}()
 
 	return api, nil
