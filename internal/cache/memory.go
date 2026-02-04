@@ -96,6 +96,7 @@ func (c *MemoryCache) RunMetricsMonitor(ctx context.Context, interval time.Durat
 	for {
 		select {
 		case <-ctx.Done():
+			log.Info("stopping cache monitor")
 			return
 		case <-timer.C:
 			// Snapshot current stats

@@ -102,6 +102,7 @@ func (s *Service) RunQueueMonitor(ctx context.Context, interval time.Duration) {
 	for {
 		select {
 		case <-ctx.Done():
+			log.Info("stopping queue monitor")
 			return
 		case <-timer.C:
 			count, err := s.cache.QueueLen(ctx)
