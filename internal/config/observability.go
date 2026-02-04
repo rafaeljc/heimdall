@@ -8,7 +8,8 @@ type ObservabilityConfig struct {
 	Port string `envconfig:"PORT" default:"9090"`
 
 	// Timeout is the unified safety valve for Read/Write/Idle operations.
-	Timeout time.Duration `envconfig:"TIMEOUT" default:"5s" validate:"min=1s"`
+	// Minimum is 6s because it needs to be higher than the Handler timeout (5s).
+	Timeout time.Duration `envconfig:"TIMEOUT" default:"10s" validate:"min=6s"`
 
 	// LivenessPath is the HTTP path for k8s liveness probe.
 	LivenessPath string `envconfig:"LIVENESS_PATH" default:"/healthz"`
