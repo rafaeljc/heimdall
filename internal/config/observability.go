@@ -18,6 +18,10 @@ type ObservabilityConfig struct {
 
 	// MetricsPath is the HTTP path for Prometheus scraping.
 	MetricsPath string `envconfig:"METRICS_PATH" default:"/metrics"`
+
+	// MetricsPollingInterval controls how often we poll infrastructure (Redis, DB, Runtime) for stats.
+	// Defaults to 10s to be conservative on overhead.
+	MetricsPollingInterval time.Duration `envconfig:"METRICS_POLLING_INTERVAL" default:"10s" validate:"min=1s"`
 }
 
 // Validate checks ObservabilityConfig fields for correctness.
