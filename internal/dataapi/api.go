@@ -4,12 +4,10 @@ package dataapi
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"sync"
 
 	"github.com/rafaeljc/heimdall/internal/cache"
-	"github.com/rafaeljc/heimdall/internal/config"
 	"github.com/rafaeljc/heimdall/internal/logger"
 	"github.com/rafaeljc/heimdall/internal/observability"
 	"github.com/rafaeljc/heimdall/internal/ruleengine"
@@ -42,18 +40,15 @@ type API struct {
 }
 
 // NewAPI creates a new Data Plane gRPC API instance.
-func NewAPI(cfg *config.DataPlaneConfig, log *slog.Logger, l2 cache.Service, engine *ruleengine.Engine) (*API, error) {
-	if cfg == nil {
-		panic("dataapi: config cannot be nil")
+func NewAPI(log *slog.Logger, l1 *cache.MemoryCache, l2 cache.Service, engine *ruleengine.Engine) (*API, error) {
+	if l1 == nil {
+		panic("dataapi: memory cache cannot be nil")
 	}
 	if l2 == nil {
 		panic("dataapi: cache service cannot be nil")
 	}
-
-	// Initialize L1 Cache (Otter) using configuration
-	l1, err := cache.NewMemoryCache(cfg.L1CacheCapacity, cfg.L1CacheTTL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize l1 cache: %w", err)
+	if engine == nil {
+		panic("dataapi: rule engine cannot be nil")
 	}
 
 	// We inject the system logger into the backgound context so that
@@ -73,16 +68,9 @@ func NewAPI(cfg *config.DataPlaneConfig, log *slog.Logger, l2 cache.Service, eng
 	// Background Tasks
 	// -------------------------------------------------------------------------
 
-	// 1. Start Pub/Sub Invalidation Watcher
+	// Start Pub/Sub Invalidation Watcher
 	api.wg.Add(1)
 	go api.watchUpdates()
-
-	// 2. Start Async Metrics Collector for L1 Cache
-	api.wg.Add(1)
-	go func() {
-		defer api.wg.Done()
-		api.l1.RunMetricsCollector(api.ctx, 0) // Default interval
-	}()
 
 	return api, nil
 }

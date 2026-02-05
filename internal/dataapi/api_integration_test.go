@@ -73,8 +73,12 @@ func setupEnv(t *testing.T) (pb.DataPlaneClient, cache.Service, func()) {
 		L1CacheTTL:      30 * time.Second,
 	}
 
+	// L1 Cache
+	l1, err := cache.NewMemoryCache(dataConfig.L1CacheCapacity, dataConfig.L1CacheTTL)
+	require.NoError(t, err)
+
 	// API Server (System Under Test)
-	api, err := dataapi.NewAPI(dataConfig, log, l2, engine)
+	api, err := dataapi.NewAPI(log, l1, l2, engine)
 	require.NoError(t, err)
 
 	// 4. In-Memory Networking (bufconn)

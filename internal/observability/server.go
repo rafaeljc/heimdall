@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rafaeljc/heimdall/internal/config"
 )
@@ -52,8 +54,18 @@ func (s *Server) setupRoutes() {
 	s.router.Get(s.cfg.ReadinessPath, s.readiness)
 
 	// Metrics Endpoint: Used by Prometheus to scrape telemetry data.
-	// promhttp.Handler() automatically exposes all metrics defined in metrics.go.
-	s.router.Method(http.MethodGet, s.cfg.MetricsPath, promhttp.Handler())
+	// We configure the handler explicitly instead of using the default to:
+	// 1. Enable OpenMetrics (Exemplars support for linking Metrics to Traces)
+	// 2. Set strict timeouts to prevent scrape hangs during GC pauses
+	// 3. Ensure we are exposing the DefaultGatherer (where Go Runtime metrics live)
+	metricsHandler := promhttp.HandlerFor(
+		prometheus.DefaultGatherer,
+		promhttp.HandlerOpts{
+			EnableOpenMetrics: true,            // Vital for P99 debugging
+			Timeout:           5 * time.Second, // Protects the app from slow scrapes
+		},
+	)
+	s.router.Method(http.MethodGet, s.cfg.MetricsPath, metricsHandler)
 }
 
 // Start runs the HTTP server in a background goroutine.

@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rafaeljc/heimdall/internal/config"
 	"github.com/rafaeljc/heimdall/internal/logger"
+	"github.com/rafaeljc/heimdall/internal/observability"
 )
 
 // NewPostgresPool initializes a PostgreSQL connection pool using DatabaseConfig.
@@ -63,4 +64,69 @@ func NewPostgresPool(ctx context.Context, dbCfg *config.DatabaseConfig) (*pgxpoo
 	}
 	pool.Close()
 	return nil, fmt.Errorf("failed to ping database after %d retries: %w", maxRetries, lastErr)
+}
+
+// RunPoolMonitor periodically records connection pool statistics to Prometheus.
+// It tracks pool size, usage, and acquisition latency/wait times.
+// This function blocks until ctx is canceled, so it should be run in a goroutine.
+//
+// Usage: go database.RunPoolMonitor(ctx, pool, 10*time.Second)
+func RunPoolMonitor(ctx context.Context, pool *pgxpool.Pool, interval time.Duration) {
+	log := logger.FromContext(ctx).With(slog.String("component", "postgres_monitor"))
+	log.Info("starting postgres pool monitor", slog.Duration("interval", interval))
+
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+
+	// Initialize previous state to calculate deltas correctly.
+	// We capture the initial state so we don't report the entire history as a sudden spike.
+	initialStats := pool.Stat()
+	prevAcquireCount := initialStats.AcquireCount()
+	prevAcquireDuration := initialStats.AcquireDuration()
+	prevWaitCount := initialStats.EmptyAcquireCount()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("stopping postgres pool monitor")
+			return
+		case <-timer.C:
+			stats := pool.Stat()
+
+			// 1. Update Gauges (Absolute State)
+			// Labels: state (idle, in_use, total, max)
+			observability.DBPoolConnections.WithLabelValues("total").Set(float64(stats.TotalConns()))
+			observability.DBPoolConnections.WithLabelValues("idle").Set(float64(stats.IdleConns()))
+			observability.DBPoolConnections.WithLabelValues("in_use").Set(float64(stats.AcquiredConns()))
+			observability.DBPoolConnections.WithLabelValues("max").Set(float64(stats.MaxConns()))
+
+			// 2. Update Counters (Cumulative Deltas)
+			// Since pgxpool returns total cumulative counts, and Prometheus Counters expect increments,
+			// we must calculate the delta since the last tick.
+
+			// Acquire Count
+			if current := stats.AcquireCount(); current > prevAcquireCount {
+				delta := float64(current - prevAcquireCount)
+				observability.DBPoolAcquireCount.Add(delta)
+				prevAcquireCount = current
+			}
+
+			// Acquire Duration
+			if current := stats.AcquireDuration(); current > prevAcquireDuration {
+				delta := (current - prevAcquireDuration).Seconds()
+				observability.DBPoolAcquireDuration.Add(delta)
+				prevAcquireDuration = current
+			}
+
+			// Wait Count (EmptyAcquireCount: times we had to wait for a connection)
+			if current := stats.EmptyAcquireCount(); current > prevWaitCount {
+				delta := float64(current - prevWaitCount)
+				observability.DBPoolWaitCount.Add(delta)
+				prevWaitCount = current
+			}
+
+			// Reset timer for next interval
+			timer.Reset(interval)
+		}
+	}
 }

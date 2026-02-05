@@ -144,4 +144,79 @@ var (
 		Name:      "redis_queue_depth",
 		Help:      "Current number of items in the update queue",
 	})
+
+	// -------------------------------------------------------------------------
+	// INFRASTRUCTURE (DB & Cache Pools)
+	// -------------------------------------------------------------------------
+
+	// --- Database (Postgres) ---
+
+	// DBPoolConnections tracks the state of connections in the PG pool.
+	// Labels: state (idle, in_use, total, max)
+	DBPoolConnections = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Subsystem: "database",
+		Name:      "pool_connections",
+		Help:      "Number of connections in the pool by state",
+	}, []string{"state"})
+
+	// DBPoolAcquireCount tracks how many times a connection was requested.
+	DBPoolAcquireCount = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: "database",
+		Name:      "pool_acquire_count_total",
+		Help:      "Total number of connection acquisition attempts",
+	})
+
+	// DBPoolAcquireDuration tracks the total time spent waiting for a connection.
+	// Useful for calculating average wait time = duration / count.
+	DBPoolAcquireDuration = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: "database",
+		Name:      "pool_acquire_duration_seconds_total",
+		Help:      "Total time spent waiting for a connection",
+	})
+
+	// DBPoolWaitCount tracks how many times the pool was empty and caller had to wait.
+	DBPoolWaitCount = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: "database",
+		Name:      "pool_wait_count_total",
+		Help:      "Total number of times a connection request had to wait",
+	})
+
+	// --- Cache (Redis) ---
+
+	// RedisPoolConnections tracks the state of connections in the Redis pool.
+	// Labels: state (idle, total, stale)
+	RedisPoolConnections = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Subsystem: "redis",
+		Name:      "pool_connections",
+		Help:      "Number of connections in the pool by state",
+	}, []string{"state"})
+
+	// RedisPoolHits tracks valid connections reused from the pool.
+	RedisPoolHits = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: "redis",
+		Name:      "pool_hits_total",
+		Help:      "Total number of times a connection was found in the pool",
+	})
+
+	// RedisPoolMisses tracks new connections created because pool was empty.
+	RedisPoolMisses = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: "redis",
+		Name:      "pool_misses_total",
+		Help:      "Total number of times a new connection had to be created",
+	})
+
+	// RedisPoolTimeouts tracks failures to obtain a connection.
+	RedisPoolTimeouts = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: "redis",
+		Name:      "pool_timeouts_total",
+		Help:      "Total number of connection pool timeouts",
+	})
 )

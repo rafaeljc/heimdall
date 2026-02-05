@@ -69,6 +69,10 @@ func run() error {
 	}
 	defer redisClient.Close()
 
+	// Start monitors
+	go database.RunPoolMonitor(ctx, pgPool, cfg.Observability.MetricsPollingInterval)
+	go cache.RunPoolMonitor(ctx, redisClient, cfg.Observability.MetricsPollingInterval)
+
 	// -------------------------------------------------------------------------
 	// 3. Dependency Injection
 	// -------------------------------------------------------------------------
@@ -84,6 +88,9 @@ func run() error {
 		flagRepo,
 		redisCache,
 	)
+
+	// Start monitor
+	go worker.RunQueueMonitor(ctx, cfg.Observability.MetricsPollingInterval)
 
 	// Observability Server Initialization
 	obsServer := observability.NewServer(

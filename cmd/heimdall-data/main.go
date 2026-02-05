@@ -67,6 +67,12 @@ func run() error {
 	// 2. Infrastructure Setup
 	// -------------------------------------------------------------------------
 
+	// Initialize In-Memory Cache (L1 Cache)
+	memoryCache, err := cache.NewMemoryCache(cfg.Server.Data.L1CacheCapacity, cfg.Server.Data.L1CacheTTL)
+	if err != nil {
+		return fmt.Errorf("failed to initialize l1 cache: %w", err)
+	}
+
 	// Rule Engine
 	engine := ruleengine.New(log)
 
@@ -78,13 +84,17 @@ func run() error {
 	// Deferred close happens in reverse order of creation in the shutdown block
 	// but we place it here conceptually. We will manage exact closing order below.
 
+	// Start monitors
+	go cache.RunPoolMonitor(ctx, redisClient, cfg.Observability.MetricsPollingInterval)
+	go memoryCache.RunMetricsMonitor(ctx, cfg.Observability.MetricsPollingInterval)
+
 	// -------------------------------------------------------------------------
 	// 3. Wiring (Dependency Injection)
 	// -------------------------------------------------------------------------
 	redisCache := cache.NewRedisCache(redisClient)
 
 	// Initialize the gRPC API implementation
-	api, err := dataapi.NewAPI(&cfg.Server.Data, log, redisCache, engine)
+	api, err := dataapi.NewAPI(log, memoryCache, redisCache, engine)
 	if err != nil {
 		redisClient.Close()
 		return fmt.Errorf("failed to initialize data api: %w", err)

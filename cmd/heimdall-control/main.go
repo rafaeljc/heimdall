@@ -80,6 +80,11 @@ func run() error {
 		return fmt.Errorf("failed to connect to redis: %w", err)
 	}
 	defer redisClient.Close()
+
+	// Start monitors
+	go database.RunPoolMonitor(ctx, pgPool, cfg.Observability.MetricsPollingInterval)
+	go cache.RunPoolMonitor(ctx, redisClient, cfg.Observability.MetricsPollingInterval)
+
 	// -------------------------------------------------------------------------
 	// 2. Dependency Injection & Wiring
 	// -------------------------------------------------------------------------
