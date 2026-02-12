@@ -16,9 +16,9 @@ import (
 )
 
 // API implements the gRPC DataPlane service defined in the proto contract.
-// It embeds the UnimplementedDataPlaneServer for forward compatibility.
+// It embeds the UnimplementedDataPlaneServiceServer for forward compatibility.
 type API struct {
-	pb.UnimplementedDataPlaneServer
+	pb.UnimplementedDataPlaneServiceServer
 
 	l1     *cache.MemoryCache
 	l2     cache.Service
@@ -78,7 +78,7 @@ func NewAPI(log *slog.Logger, l1 *cache.MemoryCache, l2 cache.Service, engine *r
 // Register connects this implementation to the grpc.Server engine.
 // This encapsulates the registration logic, keeping main.go clean.
 func (a *API) Register(grpcServer *grpc.Server) {
-	pb.RegisterDataPlaneServer(grpcServer, a)
+	pb.RegisterDataPlaneServiceServer(grpcServer, a)
 }
 
 // Close performs a graceful shutdown of the API.

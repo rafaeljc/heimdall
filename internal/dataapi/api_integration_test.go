@@ -35,7 +35,7 @@ const bufSize = 1024 * 1024
 // - Redis Container (Real L2 Cache)
 // - Data Plane API (L1 Memory Cache + gRPC Server)
 // - gRPC Client connected via memory (bufconn)
-func setupEnv(t *testing.T) (pb.DataPlaneClient, cache.Service, func()) {
+func setupEnv(t *testing.T) (pb.DataPlaneServiceClient, cache.Service, func()) {
 	t.Helper()
 
 	// 1. Silent Logger (prevents pollution in CI, use os.Stdout for debugging)
@@ -85,7 +85,7 @@ func setupEnv(t *testing.T) (pb.DataPlaneClient, cache.Service, func()) {
 	// Simulates TCP networking without opening real host ports, allowing full parallelism.
 	lis := bufconn.Listen(bufSize)
 	s := grpc.NewServer()
-	pb.RegisterDataPlaneServer(s, api)
+	pb.RegisterDataPlaneServiceServer(s, api)
 
 	// Start the gRPC server in a goroutine
 	go func() {
@@ -103,7 +103,7 @@ func setupEnv(t *testing.T) (pb.DataPlaneClient, cache.Service, func()) {
 	)
 	require.NoError(t, err)
 
-	client := pb.NewDataPlaneClient(conn)
+	client := pb.NewDataPlaneServiceClient(conn)
 
 	// 6. Teardown (Graceful Shutdown)
 	cleanup := func() {
