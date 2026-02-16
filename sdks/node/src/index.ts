@@ -1,1 +1,2 @@
-export const VERSION = '0.1.0';
+export { HeimdallClient } from './client';
+export { HeimdallOptions, Context, VERSION } from './types';
