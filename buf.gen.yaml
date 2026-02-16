@@ -1,8 +1,6 @@
 version: v1
 managed:
   enabled: true
-  # Configures how Go packages are managed. 
-  # This ensures consistent import paths across the backend.
   go_package_prefix:
     default: github.com/rafaeljc/heimdall
     except:
@@ -20,15 +18,17 @@ plugins:
     opt: paths=source_relative
 
   # ============================================================================
-  # SDK Generation (Node.js)
+  # SDK Generation (Node.js/TypeScript)
   # ============================================================================
-  # Generates the gRPC service clients using the purely JS implementation (@grpc/grpc-js).
-  - plugin: buf.build/grpc/node:v1.12.0
+  #
+  - plugin: buf.build/community/stephenh-ts-proto:v2.11.2
     out: sdks/node/src/generated
-    opt: grpc_js
-
-  # Generates the Protocol Buffer message objects (Request/Response types).
-  # We use CommonJS to maintain compatibility with standard Node.js tooling.
-  - plugin: buf.build/protocolbuffers/js:v3.21.2
-    out: sdks/node/src/generated
-    opt: import_style=commonjs,binary
+    opt:
+      # Generate definitions compatible with grpc-js
+      - outputServices=grpc-js
+      # Guarantee import compatibility between CommonJS and ES Modules
+      - esModuleInterop=true
+      # Use string enums for better debugging
+      - stringEnums=true
+      # Disable generation of unnecessary methods
+      - outputJsonMethods=false
