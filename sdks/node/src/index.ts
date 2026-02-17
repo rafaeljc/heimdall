@@ -1,2 +1,2 @@
 export { HeimdallClient } from './client';
-export { HeimdallOptions, Context, VERSION } from './types';
+export { HeimdallOptions, Context, EvaluationResult, fromEvaluateResponse, VERSION } from './types';

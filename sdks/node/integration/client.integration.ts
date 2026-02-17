@@ -35,13 +35,13 @@ describe('HeimdallClient - Integration Tests', () => {
         target: server.getAddress(),
         insecure: true,
       });
-      let result = await client.getBool('feature_enabled', {}, false);
-      expect(result).toBe(true);
+      let result = await client.getEvaluation('feature_enabled', {}, false);
+      expect(result.value).toBe(true);
 
       // Test false value
       server.setEvaluationResult('feature_disabled', false);
-      result = await client.getBool('feature_disabled', {}, true);
-      expect(result).toBe(false);
+      result = await client.getEvaluation('feature_disabled', {}, true);
+      expect(result.value).toBe(false);
 
       client.close();
     });
@@ -55,12 +55,12 @@ describe('HeimdallClient - Integration Tests', () => {
       });
 
       // This call includes context that should be serialized and sent to the server
-      const result = await client.getBool(
+      const result = await client.getEvaluation(
         'feature_premium',
         { user_id: 'premium_user', tier: 'gold' },
         false,
       );
-      expect(result).toBe(true);
+      expect(result.value).toBe(true);
 
       // Verify the server received a request (the fact that we got a response
       // proves the gRPC call succeeded with context serialized in the protobuf message)
@@ -79,15 +79,15 @@ describe('HeimdallClient - Integration Tests', () => {
       });
 
       // First call - should hit server
-      const result1 = await client.getBool('feature_cached', { user_id: '123' }, false);
-      expect(result1).toBe(true);
+      const result1 = await client.getEvaluation('feature_cached', { user_id: '123' }, false);
+      expect(result1.value).toBe(true);
 
       // Change server behavior
       server.setEvaluationResult('feature_cached', false);
 
       // Second call with same context - should hit cache (return true, not false)
-      const result2 = await client.getBool('feature_cached', { user_id: '123' }, false);
-      expect(result2).toBe(true); // Cached value, not the new false from server
+      const result2 = await client.getEvaluation('feature_cached', { user_id: '123' }, false);
+      expect(result2.value).toBe(true); // Cached value, not the new false from server
 
       client.close();
     });
@@ -102,8 +102,8 @@ describe('HeimdallClient - Integration Tests', () => {
       });
 
       // First call
-      const result1 = await client.getBool('feature_ttl', {}, false);
-      expect(result1).toBe(true);
+      const result1 = await client.getEvaluation('feature_ttl', {}, false);
+      expect(result1.value).toBe(true);
 
       // Change server value
       server.setEvaluationResult('feature_ttl', false);
@@ -112,8 +112,8 @@ describe('HeimdallClient - Integration Tests', () => {
       await new Promise((resolve) => setTimeout(resolve, 150));
 
       // Second call after expiration - should get new value from server
-      const result2 = await client.getBool('feature_ttl', {}, true);
-      expect(result2).toBe(false); // Fresh value from server
+      const result2 = await client.getEvaluation('feature_ttl', {}, true);
+      expect(result2.value).toBe(false); // Fresh value from server
 
       client.close();
     });
@@ -128,15 +128,15 @@ describe('HeimdallClient - Integration Tests', () => {
       });
 
       // First call
-      const result1 = await client.getBool('feature_no_cache', {}, false);
-      expect(result1).toBe(true);
+      const result1 = await client.getEvaluation('feature_no_cache', {}, false);
+      expect(result1.value).toBe(true);
 
       // Change server value
       server.setEvaluationResult('feature_no_cache', false);
 
       // Second call should hit server again (no cache)
-      const result2 = await client.getBool('feature_no_cache', {}, true);
-      expect(result2).toBe(false); // Gets new value from server
+      const result2 = await client.getEvaluation('feature_no_cache', {}, true);
+      expect(result2.value).toBe(false); // Gets new value from server
 
       client.close();
     });
@@ -154,8 +154,8 @@ describe('HeimdallClient - Integration Tests', () => {
       // Configure server to fail
       server.setFailureMode(true);
 
-      const result = await client.getBool('any_flag', {}, false);
-      expect(result).toBe(false); // Returns default value
+      const result = await client.getEvaluation('any_flag', {}, false);
+      expect(result.value).toBe(false); // Returns default value
 
       client.close();
     });
@@ -170,8 +170,8 @@ describe('HeimdallClient - Integration Tests', () => {
         timeout: 500, // Short timeout
       });
 
-      const result = await client.getBool('any_flag', {}, false);
-      expect(result).toBe(false); // Returns default value
+      const result = await client.getEvaluation('any_flag', {}, false);
+      expect(result.value).toBe(false); // Returns default value
 
       client.close();
     });
@@ -186,13 +186,13 @@ describe('HeimdallClient - Integration Tests', () => {
 
       // First call - server fails
       server.setFailureMode(true);
-      const result1 = await client.getBool('feature_retry', {}, false);
-      expect(result1).toBe(false); // Returns default
+      const result1 = await client.getEvaluation('feature_retry', {}, false);
+      expect(result1.value).toBe(false); // Returns default
 
       // Second call - server recovers
       server.setFailureMode(false);
-      const result2 = await client.getBool('feature_retry', {}, false);
-      expect(result2).toBe(true); // Gets actual value from server (not cached error)
+      const result2 = await client.getEvaluation('feature_retry', {}, false);
+      expect(result2.value).toBe(true); // Gets actual value from server (not cached error)
 
       client.close();
     });
@@ -209,24 +209,24 @@ describe('HeimdallClient - Integration Tests', () => {
       });
 
       // First call with context in one order
-      const result1 = await client.getBool(
+      const result1 = await client.getEvaluation(
         'feature_context',
         { user_id: '123', region: 'us-west' },
         false,
       );
-      expect(result1).toBe(true);
+      expect(result1.value).toBe(true);
 
       // Change server behavior
       server.setEvaluationResult('feature_context', false);
 
       // Second call with same context in different order
-      const result2 = await client.getBool(
+      const result2 = await client.getEvaluation(
         'feature_context',
         { region: 'us-west', user_id: '123' }, // Different order
         false,
       );
       // Should hit cache (return true), proving cache key is order-independent
-      expect(result2).toBe(true);
+      expect(result2.value).toBe(true);
 
       client.close();
     });

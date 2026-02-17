@@ -1,7 +1,14 @@
 import * as grpc from '@grpc/grpc-js';
 import { LRUCache } from 'lru-cache';
 import { DataPlaneServiceClient, EvaluateRequest } from './generated/heimdall/v1/data_plane';
-import { Context, HeimdallOptions, Logger, VERSION } from './types';
+import {
+  Context,
+  EvaluationResult,
+  HeimdallOptions,
+  Logger,
+  VERSION,
+  fromEvaluateResponse,
+} from './types';
 
 // =============================================================================
 // Constants & Defaults (Safety Limits)
@@ -23,7 +30,7 @@ export class HeimdallClient {
   private readonly logger: Logger;
 
   // L1 Cache: Stores evaluation results to reduce network calls
-  private readonly cache: LRUCache<string, boolean> | null;
+  private readonly cache: LRUCache<string, EvaluationResult> | null;
 
   /**
    * Creates a new instance of HeimdallClient.
@@ -138,27 +145,31 @@ export class HeimdallClient {
   }
 
   /**
-   * Evaluates a boolean feature flag.
+   * Evaluates a feature flag and returns both the decision and evaluation reason.
    *
    * Uses a read-through caching strategy:
    * 1. Check L1 in-memory cache first
    * 2. On miss, fetch from gRPC server
    * 3. Cache the result for future calls
-   * 4. Return the value or default on error
+   * 4. Return the evaluation result (value + reason) or default on error
    *
    * @param key - The unique identifier of the feature flag
    * @param context - User/request context for rule evaluation (e.g., user_id, region)
    * @param defaultValue - Fallback value returned if evaluation fails or server is unavailable
-   * @returns The evaluated flag value from cache or server; defaults to `defaultValue` on error
+   * @returns The evaluated flag result with value and reason; defaults to `defaultValue` with "ERROR" reason on error
    */
-  public async getBool(key: string, context: Context, defaultValue: boolean): Promise<boolean> {
+  public async getEvaluation(
+    key: string,
+    context: Context,
+    defaultValue: boolean,
+  ): Promise<EvaluationResult> {
     // 1. Fast Path: Cache Hit
     if (this.cache) {
       const cacheKey = this.generateCacheKey(key, context);
-      const cachedValue = this.cache.get(cacheKey);
-      if (cachedValue !== undefined) {
+      const cachedResult = this.cache.get(cacheKey);
+      if (cachedResult !== undefined) {
         this.logger.debug(`Cache hit for flag '${key}'`);
-        return cachedValue;
+        return cachedResult;
       }
       this.logger.debug(`Cache miss for flag '${key}'`);
     }
@@ -177,14 +188,14 @@ export class HeimdallClient {
    * @param key - Feature flag key
    * @param context - Evaluation context
    * @param defaultValue - Value to return on error
-   * @returns The flag value from server, or defaultValue on error
+   * @returns The flag evaluation result with value and reason
    * @private
    */
   private async fetchFromNetwork(
     key: string,
     context: Context,
     defaultValue: boolean,
-  ): Promise<boolean> {
+  ): Promise<EvaluationResult> {
     return new Promise((resolve) => {
       // Construct the Request POJO (Plain Old JavaScript Object)
       // We map the incoming 'key' to the proto definition 'flagKey'
@@ -201,35 +212,32 @@ export class HeimdallClient {
 
       // Execute gRPC Call
       this.client.evaluate(request, metadata, { deadline }, (err, response) => {
+        const result = fromEvaluateResponse(response, err, defaultValue);
+
         if (err) {
           // Log the error but return default to keep application alive.
           // We do NOT cache errors (so we can retry later).
           this.logger.error(
             `Failed to evaluate flag '${key}': ${err.code} - ${err.message}. Returning default: ${defaultValue}`,
           );
-          resolve(defaultValue);
-          return;
-        }
-
-        if (!response) {
+        } else if (!response) {
           this.logger.warn(
             `Empty response received for flag '${key}'. Returning default: ${defaultValue}`,
           );
-          resolve(defaultValue);
-          return;
+        } else {
+          this.logger.debug(
+            `Flag '${key}' evaluated to: ${result.value} (reason: ${result.reason})`,
+          );
+
+          // Write to Cache (if enabled)
+          if (this.cache) {
+            const cacheKey = this.generateCacheKey(key, context);
+            this.cache.set(cacheKey, result);
+            this.logger.debug(`Cached result for flag '${key}'`);
+          }
         }
 
-        const value = response.value;
-        this.logger.debug(`Flag '${key}' evaluated to: ${value}`);
-
-        // 3. Write to Cache (if enabled)
-        if (this.cache) {
-          const cacheKey = this.generateCacheKey(key, context);
-          this.cache.set(cacheKey, value);
-          this.logger.debug(`Cached result for flag '${key}'`);
-        }
-
-        resolve(value);
+        resolve(result);
       });
     });
   }

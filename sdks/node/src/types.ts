@@ -53,6 +53,48 @@ export interface Logger {
 export type Context = Record<string, string>;
 
 /**
+ * Result of a flag evaluation.
+ */
+export interface EvaluationResult {
+  /**
+   * The evaluated flag value (true = enabled, false = disabled).
+   */
+  value: boolean;
+
+  /**
+   * Reason explains why the decision was made.
+   * Examples: "STATIC_OFF", "DEFAULT_VALUE", "RULE_MATCH".
+   * Critical for debugging why a specific value was returned.
+   */
+  reason: string;
+}
+
+/**
+ * Creates an EvaluationResult from a gRPC response.
+ * Unpacks the response and instantiates the proper EvaluationResult object.
+ * Single source of truth for response → EvaluationResult conversion.
+ *
+ * @param response - The gRPC EvaluateResponse (may be null/undefined)
+ * @param err - Any error that occurred during the gRPC call (gRPC errors are not strictly typed)
+ * @param defaultValue - The default value to return on error
+ * @returns An EvaluationResult object
+ */
+export function fromEvaluateResponse(
+  response: unknown,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  err: any,
+  defaultValue: boolean,
+): EvaluationResult {
+  if (err || !response) {
+    return { value: defaultValue, reason: 'ERROR' };
+  }
+  return {
+    value: (response as Record<string, unknown>).value as boolean,
+    reason: (response as Record<string, unknown>).reason as string,
+  };
+}
+
+/**
  * Configuration options for the Heimdall Client.
  */
 export interface HeimdallOptions {
