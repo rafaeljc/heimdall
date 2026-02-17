@@ -1,4 +1,4 @@
-import { HeimdallClient } from '../src/client';
+import { HeimdallClient } from '../../src/client';
 import { MockDataPlaneServer } from './fixtures/grpc-server';
 
 /**

@@ -22,16 +22,18 @@
   "scripts": {
     "clean": "rm -rf dist coverage tsconfig.tsbuildinfo",
     "prebuild": "npm run clean",
-    "build": "tsc",
-    "lint": "eslint 'src/**/*.{ts,js}'",
-    "lint:fix": "eslint 'src/**/*.{ts,js}' --fix",
-    "format": "prettier --write 'src/**/*.{ts,js}'",
-    "format:check": "prettier --check 'src/**/*.{ts,js}'",
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint '{src,tests}/**/*.{ts,js}'",
+    "lint:fix": "eslint '{src,tests}/**/*.{ts,js}' --fix",
+    "format": "prettier --write '{src,tests}/**/*.{ts,js}'",
+    "format:check": "prettier --check '{src,tests}/**/*.{ts,js}'",
     "test": "jest",
-    "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
-    "test:integration": "jest --config jest.integration.js",
-    "test:all": "npm run test && npm run test:integration"
+    "test:unit": "jest --selectProjects unit",
+    "test:unit:watch": "jest --selectProjects unit --watch",    
+    "test:integration": "jest --selectProjects integration",
+    "verify": "npm run lint && npm run format:check && npm run test && npm run build",
+    "prepublishOnly": "npm run verify"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.11.0",

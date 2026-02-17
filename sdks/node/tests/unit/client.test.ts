@@ -1,5 +1,5 @@
 import * as grpc from '@grpc/grpc-js';
-import { HeimdallClient } from '../client';
+import { HeimdallClient } from '../../src/client';
 import { createMockLogger } from './fixtures/mocks';
 
 describe('HeimdallClient', () => {

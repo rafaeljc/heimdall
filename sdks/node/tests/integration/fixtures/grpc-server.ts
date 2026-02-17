@@ -4,7 +4,7 @@ import {
   DataPlaneServiceServer,
   EvaluateRequest,
   EvaluateResponse,
-} from '../../src/generated/heimdall/v1/data_plane';
+} from '../../../src/generated/heimdall/v1/data_plane';
 
 /**
  * Real gRPC server for integration testing.

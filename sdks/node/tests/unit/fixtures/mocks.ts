@@ -1,4 +1,4 @@
-import { Logger, Context } from '../../types';
+import { Logger, Context } from '../../../src/types';
 
 /**
  * Creates a mock Logger for testing purposes.
