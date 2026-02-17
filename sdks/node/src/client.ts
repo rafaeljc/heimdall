@@ -28,6 +28,7 @@ export class HeimdallClient {
   private client: DataPlaneServiceClient;
   private readonly timeout: number;
   private readonly logger: Logger;
+  private readonly metadata: grpc.Metadata;
 
   // L1 Cache: Stores evaluation results to reduce network calls
   private readonly cache: LRUCache<string, EvaluationResult> | null;
@@ -40,8 +41,13 @@ export class HeimdallClient {
    */
   constructor(options: HeimdallOptions) {
     this.logger = options.logger ?? this.createDefaultLogger();
-    this.validateTarget(options.target);
+    this.validateOptions(options);
     this.timeout = this.sanitizeTimeout(options.timeout);
+
+    // Pre-construct metadata with API Key and SDK version for authentication and telemetry.
+    this.metadata = new grpc.Metadata();
+    this.metadata.add('authorization', `Bearer ${options.apiKey}`);
+    this.metadata.add('x-heimdall-sdk', `node/${VERSION}`);
 
     // Initialize Cache Strategy
     const ttl = options.cacheTTL ?? DEFAULT_CACHE_TTL_MS;
@@ -86,12 +92,31 @@ export class HeimdallClient {
   }
 
   /**
+   * Validates the provided configuration options.
+   */
+  private validateOptions(options: HeimdallOptions): void {
+    this.validateTarget(options.target);
+    this.validateAPIKey(options.apiKey);
+  }
+
+  /**
    * Validates that the target connection string is present.
    */
   private validateTarget(target: string): void {
     if (!target || target.trim().length === 0) {
       throw new Error(
         '[Heimdall SDK] Configuration Error: "target" is required and cannot be empty.',
+      );
+    }
+  }
+
+  /**
+   * Validates that the API Key is present.
+   */
+  private validateAPIKey(apiKey: string): void {
+    if (!apiKey || apiKey.trim().length === 0) {
+      throw new Error(
+        '[Heimdall SDK] Configuration Error: "apiKey" is required and cannot be empty.',
       );
     }
   }
@@ -206,12 +231,11 @@ export class HeimdallClient {
 
       // Set Deadline (Client-side Timeout)
       const deadline = new Date(Date.now() + this.timeout);
-      const metadata = new grpc.Metadata();
 
       this.logger.debug(`Evaluating flag '${key}' with context: ${JSON.stringify(context)}`);
 
       // Execute gRPC Call
-      this.client.evaluate(request, metadata, { deadline }, (err, response) => {
+      this.client.evaluate(request, this.metadata, { deadline }, (err, response) => {
         const result = fromEvaluateResponse(response, err, defaultValue);
 
         if (err) {
@@ -220,6 +244,10 @@ export class HeimdallClient {
           this.logger.error(
             `Failed to evaluate flag '${key}': ${err.code} - ${err.message}. Returning default: ${defaultValue}`,
           );
+
+          if (err.code === grpc.status.UNAUTHENTICATED) {
+            this.logger.error('CRITICAL: Invalid API Key. Please verify your credentials.');
+          }
         } else if (!response) {
           this.logger.warn(
             `Empty response received for flag '${key}'. Returning default: ${defaultValue}`,

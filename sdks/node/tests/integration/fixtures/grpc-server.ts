@@ -19,6 +19,9 @@ export class MockDataPlaneServer {
   private shouldFail = false;
   private evaluationResults: Record<string, boolean> = {};
 
+  // Track metadata received in requests for testing
+  private lastReceivedMetadata: grpc.Metadata | null = null;
+
   constructor(port: number = 50051) {
     this.port = port;
     this.server = new grpc.Server();
@@ -33,9 +36,19 @@ export class MockDataPlaneServer {
         call: grpc.ServerUnaryCall<EvaluateRequest, EvaluateResponse>,
         callback: grpc.sendUnaryData<EvaluateResponse>,
       ): void => {
+        // Capture metadata for testing
+        this.lastReceivedMetadata = call.metadata;
+
         try {
           if (this.shouldFail) {
-            callback(new Error('Simulated server error'));
+            const error: grpc.ServiceError = {
+              name: 'ServiceError',
+              message: 'Simulated server error',
+              code: grpc.status.INTERNAL,
+              details: 'Simulated failure mode enabled',
+              metadata: new grpc.Metadata(),
+            };
+            callback(error, null);
             return;
           }
 
@@ -50,7 +63,14 @@ export class MockDataPlaneServer {
 
           callback(null, response);
         } catch (err) {
-          callback(err as Error);
+          const error: grpc.ServiceError = {
+            name: 'ServiceError',
+            message: (err as Error).message || 'Unknown error',
+            code: grpc.status.UNKNOWN,
+            details: 'Handler exception',
+            metadata: new grpc.Metadata(),
+          };
+          callback(error, null);
         }
       },
     };
@@ -63,10 +83,7 @@ export class MockDataPlaneServer {
         grpc.ServerCredentials.createInsecure(),
         (err) => {
           if (err) reject(err);
-          else {
-            this.server.start();
-            resolve();
-          }
+          else resolve();
         },
       );
     });
@@ -101,6 +118,7 @@ export class MockDataPlaneServer {
   reset(): void {
     this.shouldFail = false;
     this.evaluationResults = {};
+    this.lastReceivedMetadata = null;
   }
 
   /**
@@ -108,5 +126,12 @@ export class MockDataPlaneServer {
    */
   getAddress(): string {
     return `127.0.0.1:${this.port}`;
+  }
+
+  /**
+   * Gets the last metadata received from a request (for testing).
+   */
+  getLastMetadata(): grpc.Metadata | null {
+    return this.lastReceivedMetadata;
   }
 }

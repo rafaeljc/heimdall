@@ -2,6 +2,8 @@ import * as grpc from '@grpc/grpc-js';
 import { HeimdallClient } from '../../src/client';
 import { createMockLogger } from './fixtures/mocks';
 
+const DUMMY_API_KEY = 'test_key_dummy_1234567890abcdef';
+
 describe('HeimdallClient', () => {
   describe('Configuration Validation', () => {
     it('should throw on empty target', () => {
@@ -10,6 +12,7 @@ describe('HeimdallClient', () => {
         () =>
           new HeimdallClient({
             target: '',
+            apiKey: DUMMY_API_KEY,
             logger: mockLogger,
           }),
       ).toThrow('[Heimdall SDK] Configuration Error: "target" is required and cannot be empty.');
@@ -21,6 +24,7 @@ describe('HeimdallClient', () => {
         () =>
           new HeimdallClient({
             target: '   ',
+            apiKey: DUMMY_API_KEY,
             logger: mockLogger,
           }),
       ).toThrow('[Heimdall SDK] Configuration Error: "target" is required and cannot be empty.');
@@ -32,6 +36,43 @@ describe('HeimdallClient', () => {
         () =>
           new HeimdallClient({
             target: 'localhost:50051',
+            apiKey: DUMMY_API_KEY,
+            logger: mockLogger,
+          }),
+      ).not.toThrow();
+    });
+
+    it('should throw on empty API key', () => {
+      const mockLogger = createMockLogger();
+      expect(
+        () =>
+          new HeimdallClient({
+            target: 'localhost:50051',
+            apiKey: '',
+            logger: mockLogger,
+          }),
+      ).toThrow('[Heimdall SDK] Configuration Error: "apiKey" is required and cannot be empty.');
+    });
+
+    it('should throw on whitespace-only API key', () => {
+      const mockLogger = createMockLogger();
+      expect(
+        () =>
+          new HeimdallClient({
+            target: 'localhost:50051',
+            apiKey: '   ',
+            logger: mockLogger,
+          }),
+      ).toThrow('[Heimdall SDK] Configuration Error: "apiKey" is required and cannot be empty.');
+    });
+
+    it('should accept valid API key', () => {
+      const mockLogger = createMockLogger();
+      expect(
+        () =>
+          new HeimdallClient({
+            target: 'localhost:50051',
+            apiKey: DUMMY_API_KEY,
             logger: mockLogger,
           }),
       ).not.toThrow();
@@ -47,6 +88,7 @@ describe('HeimdallClient', () => {
         () =>
           new HeimdallClient({
             target: validTarget,
+            apiKey: DUMMY_API_KEY,
             timeout: 5000,
             logger: mockLogger,
           }),
@@ -57,6 +99,7 @@ describe('HeimdallClient', () => {
       const mockLogger = createMockLogger();
       const client = new HeimdallClient({
         target: validTarget,
+        apiKey: DUMMY_API_KEY,
         timeout: 19,
         logger: mockLogger,
       });
@@ -70,6 +113,7 @@ describe('HeimdallClient', () => {
       const mockLogger = createMockLogger();
       const client = new HeimdallClient({
         target: validTarget,
+        apiKey: DUMMY_API_KEY,
         timeout: 10001,
         logger: mockLogger,
       });
@@ -83,6 +127,7 @@ describe('HeimdallClient', () => {
       const mockLogger = createMockLogger();
       const client = new HeimdallClient({
         target: validTarget,
+        apiKey: DUMMY_API_KEY,
         timeout: NaN,
         logger: mockLogger,
       });
@@ -96,6 +141,7 @@ describe('HeimdallClient', () => {
       const mockLogger = createMockLogger();
       const client = new HeimdallClient({
         target: validTarget,
+        apiKey: DUMMY_API_KEY,
         logger: mockLogger,
       });
 
@@ -113,6 +159,7 @@ describe('HeimdallClient', () => {
       const mockLogger = createMockLogger();
       const client = new HeimdallClient({
         target: validTarget,
+        apiKey: DUMMY_API_KEY,
         logger: mockLogger,
       });
 
@@ -125,6 +172,7 @@ describe('HeimdallClient', () => {
       const mockLogger = createMockLogger();
       const client = new HeimdallClient({
         target: validTarget,
+        apiKey: DUMMY_API_KEY,
         cacheTTL: 0,
         logger: mockLogger,
       });
@@ -138,6 +186,7 @@ describe('HeimdallClient', () => {
       const mockLogger = createMockLogger();
       const client = new HeimdallClient({
         target: validTarget,
+        apiKey: DUMMY_API_KEY,
         cacheTTL: 30000,
         cacheSize: 500,
         logger: mockLogger,
@@ -161,6 +210,7 @@ describe('HeimdallClient', () => {
       const mockLogger = createMockLogger();
       new HeimdallClient({
         target: validTarget,
+        apiKey: DUMMY_API_KEY,
         logger: mockLogger,
       });
 
@@ -173,6 +223,7 @@ describe('HeimdallClient', () => {
       try {
         new HeimdallClient({
           target: validTarget,
+          apiKey: DUMMY_API_KEY,
         });
 
         expect(consoleSpy).toHaveBeenCalledWith(
@@ -192,6 +243,7 @@ describe('HeimdallClient', () => {
       try {
         new HeimdallClient({
           target: 'localhost:50051',
+          apiKey: DUMMY_API_KEY,
           insecure: true,
           logger: mockLogger,
         });
@@ -209,6 +261,7 @@ describe('HeimdallClient', () => {
       try {
         new HeimdallClient({
           target: 'localhost:50051',
+          apiKey: DUMMY_API_KEY,
           logger: mockLogger,
         });
 
@@ -224,6 +277,7 @@ describe('HeimdallClient', () => {
       const mockLogger = createMockLogger();
       const client = new HeimdallClient({
         target: 'localhost:50051',
+        apiKey: DUMMY_API_KEY,
         logger: mockLogger,
       });
 

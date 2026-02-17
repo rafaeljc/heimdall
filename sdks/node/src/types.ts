@@ -105,6 +105,12 @@ export interface HeimdallOptions {
   target: string;
 
   /**
+   * The API Key used to authenticate with the Heimdall server.
+   * MUST be a non-empty string.
+   */
+  apiKey: string;
+
+  /**
    * Request timeout in milliseconds.
    *
    * Constraints:

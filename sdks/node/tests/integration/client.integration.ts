@@ -11,6 +11,7 @@ import { MockDataPlaneServer } from './fixtures/grpc-server';
  * - Proper gRPC communication end-to-end
  */
 describe('HeimdallClient - Integration Tests', () => {
+  const DUMMY_API_KEY = 'test_key_dummy_1234567890abcdef';
   let server: MockDataPlaneServer;
   const serverPort = 50052; // Use different port to avoid conflicts
 
@@ -33,6 +34,7 @@ describe('HeimdallClient - Integration Tests', () => {
       server.setEvaluationResult('feature_enabled', true);
       const client = new HeimdallClient({
         target: server.getAddress(),
+        apiKey: DUMMY_API_KEY,
         insecure: true,
       });
       let result = await client.getEvaluation('feature_enabled', {}, false);
@@ -51,6 +53,7 @@ describe('HeimdallClient - Integration Tests', () => {
 
       const client = new HeimdallClient({
         target: server.getAddress(),
+        apiKey: DUMMY_API_KEY,
         insecure: true,
       });
 
@@ -74,6 +77,7 @@ describe('HeimdallClient - Integration Tests', () => {
 
       const client = new HeimdallClient({
         target: server.getAddress(),
+        apiKey: DUMMY_API_KEY,
         insecure: true,
         cacheTTL: 60000, // 60 second cache
       });
@@ -97,6 +101,7 @@ describe('HeimdallClient - Integration Tests', () => {
 
       const client = new HeimdallClient({
         target: server.getAddress(),
+        apiKey: DUMMY_API_KEY,
         insecure: true,
         cacheTTL: 100, // 100ms TTL (short for testing)
       });
@@ -123,6 +128,7 @@ describe('HeimdallClient - Integration Tests', () => {
 
       const client = new HeimdallClient({
         target: server.getAddress(),
+        apiKey: DUMMY_API_KEY,
         insecure: true,
         cacheTTL: 0, // Disable cache
       });
@@ -148,6 +154,7 @@ describe('HeimdallClient - Integration Tests', () => {
 
       const client = new HeimdallClient({
         target: server.getAddress(),
+        apiKey: DUMMY_API_KEY,
         insecure: true,
       });
 
@@ -166,6 +173,7 @@ describe('HeimdallClient - Integration Tests', () => {
       // Connect to non-existent server
       const client = new HeimdallClient({
         target: '127.0.0.1:59999', // Invalid port (not listening)
+        apiKey: DUMMY_API_KEY,
         insecure: true,
         timeout: 500, // Short timeout
       });
@@ -181,6 +189,7 @@ describe('HeimdallClient - Integration Tests', () => {
 
       const client = new HeimdallClient({
         target: server.getAddress(),
+        apiKey: DUMMY_API_KEY,
         insecure: true,
       });
 
@@ -204,6 +213,7 @@ describe('HeimdallClient - Integration Tests', () => {
 
       const client = new HeimdallClient({
         target: server.getAddress(),
+        apiKey: DUMMY_API_KEY,
         insecure: true,
         cacheTTL: 60000,
       });
@@ -236,11 +246,84 @@ describe('HeimdallClient - Integration Tests', () => {
     it('should close connection gracefully', async () => {
       const client = new HeimdallClient({
         target: server.getAddress(),
+        apiKey: DUMMY_API_KEY,
         insecure: true,
       });
 
       // Should not throw
       expect(() => client.close()).not.toThrow();
+    });
+  });
+
+  describe('Authentication & Metadata', () => {
+    it('should send API key as Bearer token in metadata', async () => {
+      server.setEvaluationResult('feature_auth', true);
+
+      const testApiKey = 'sdk_prod_key_xyz789abc123def456';
+      const client = new HeimdallClient({
+        target: server.getAddress(),
+        apiKey: testApiKey,
+        insecure: true,
+      });
+
+      // Make a request
+      await client.getEvaluation('feature_auth', {}, false);
+
+      // Check that metadata was received with API key
+      const metadata = server.getLastMetadata();
+      expect(metadata).not.toBeNull();
+      const authHeader = metadata?.get('authorization');
+      expect(authHeader).toBeDefined();
+      expect(authHeader?.[0]).toBe(`Bearer ${testApiKey}`);
+
+      client.close();
+    });
+
+    it('should send SDK version in metadata for telemetry', async () => {
+      server.setEvaluationResult('feature_telemetry', true);
+
+      const client = new HeimdallClient({
+        target: server.getAddress(),
+        apiKey: DUMMY_API_KEY,
+        insecure: true,
+      });
+
+      // Make a request
+      await client.getEvaluation('feature_telemetry', {}, false);
+
+      // Check that metadata includes SDK version
+      const metadata = server.getLastMetadata();
+      expect(metadata).not.toBeNull();
+      const sdkHeader = metadata?.get('x-heimdall-sdk');
+      expect(sdkHeader).toBeDefined();
+      expect(sdkHeader?.[0]).toMatch(/^node\/\d+\.\d+\.\d+$/);
+
+      client.close();
+    });
+
+    it('should include both API key and SDK version in every request', async () => {
+      server.setEvaluationResult('flag_1', true);
+      server.setEvaluationResult('flag_2', false);
+
+      const client = new HeimdallClient({
+        target: server.getAddress(),
+        apiKey: DUMMY_API_KEY,
+        insecure: true,
+      });
+
+      // First request
+      await client.getEvaluation('flag_1', {}, false);
+      let metadata = server.getLastMetadata();
+      expect(metadata?.get('authorization')?.[0]).toContain('Bearer');
+      expect(metadata?.get('x-heimdall-sdk')?.[0]).toMatch(/^node\//);
+
+      // Second request - verify metadata is still sent
+      await client.getEvaluation('flag_2', {}, false);
+      metadata = server.getLastMetadata();
+      expect(metadata?.get('authorization')?.[0]).toContain('Bearer');
+      expect(metadata?.get('x-heimdall-sdk')?.[0]).toMatch(/^node\//);
+
+      client.close();
     });
   });
 });

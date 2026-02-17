@@ -26,7 +26,6 @@ module.exports = {
         '^.+\\.(t|j)s$': 'ts-jest',
       },
       testEnvironment: 'node',
-      testTimeout: 30000,
       collectCoverageFrom: ['src/**/*.(t|j)s'],
       coverageDirectory: './coverage/integration',
       coveragePathIgnorePatterns: ['/node_modules/', '/generated/', '.d.ts'],
