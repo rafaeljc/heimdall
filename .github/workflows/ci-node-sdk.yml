@@ -1,0 +1,73 @@
+name: Node.js SDK CI
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'sdks/node/**'
+      - '.github/workflows/ci-node-sdk.yml'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'sdks/node/**'
+      - '.github/workflows/ci-node-sdk.yml'
+
+# Cancel previous runs of the same PR to save resources
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-check:
+    name: Quality & Tests (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ./sdks/node
+
+    strategy:
+      matrix:
+        node-version: [ 20.x, 22.x ] # Test against supported LTS versions
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: 'sdks/node/package-lock.json'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Linter
+        # Runs ESLint to check code quality
+        run: npm run lint
+
+      - name: Check Formatting
+        # Verifies code follows Prettier standards
+        run: npm run format:check
+
+      - name: Run Tests
+        # Runs unit and integration tests
+        run: npm run test
+
+      - name: Generate Coverage Report
+        # Generates coverage report for upload to Codecov
+        run: npm run test:cov
+        if: matrix.node-version == '20'
+
+      - name: Build Verification
+        # Verifies TypeScript compilation and build generation
+        run: npm run build
+
+      - name: Upload Coverage Reports
+        uses: codecov/codecov-action@v5
+        if: matrix.node-version == '20'
+        with:
+          files: ./sdks/node/coverage/lcov.info
+          flags: node-sdk
+          fail_ci_if_error: false

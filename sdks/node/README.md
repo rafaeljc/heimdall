@@ -4,6 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5+-blue.svg)](https://www.typescriptlang.org/)
 [![Node.js 20+](https://img.shields.io/badge/Node.js-20+-green.svg)](https://nodejs.org/)
+[![codecov](https://codecov.io/gh/rafaeljc/heimdall/graph/badge.svg?flag=node-sdk)](https://codecov.io/gh/rafaeljc/heimdall)
 
 The official Node.js SDK for **Heimdall**, a high-performance, open-source Feature Flagging platform.
 
