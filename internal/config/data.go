@@ -19,6 +19,12 @@ type DataPlaneConfig struct {
 	// L1 Cache configuration (in-memory cache layer)
 	L1CacheCapacity int           `envconfig:"L1_CACHE_CAPACITY" default:"10000" validate:"min=1"`
 	L1CacheTTL      time.Duration `envconfig:"L1_CACHE_TTL" default:"60s" validate:"gt=0"`
+
+	// Security
+	APIKeyHash string `envconfig:"API_KEY_HASH"`
+	TLSEnabled bool   `envconfig:"TLS_ENABLED" default:"false"`
+	TLSCert    string `envconfig:"TLS_CERT_FILE"`
+	TLSKey     string `envconfig:"TLS_KEY_FILE"`
 }
 
 // Validate performs validation on the DataPlaneConfig.
@@ -35,6 +41,17 @@ func (c *DataPlaneConfig) Validate(environment string) error {
 
 	// Production-specific minimum requirements
 	if environment == EnvironmentProduction {
+		if c.APIKeyHash == "" {
+			return fmt.Errorf("API key hash is required in production environment")
+		}
+		// Validate API key hash format (SHA-256 hex)
+		if err := validateSHA256Hash(c.APIKeyHash); err != nil {
+			return fmt.Errorf("invalid API key hash: %w", err)
+		}
+		if !c.TLSEnabled {
+			return fmt.Errorf("TLS must be enabled in production environment")
+		}
+
 		if c.L1CacheCapacity < 1000 {
 			return fmt.Errorf("data plane L1 cache capacity must be at least 1000 in production, got %d", c.L1CacheCapacity)
 		}
@@ -42,6 +59,11 @@ func (c *DataPlaneConfig) Validate(environment string) error {
 		if c.L1CacheTTL < 10*time.Second {
 			return fmt.Errorf("data plane L1 cache TTL must be at least 10s in production, got %v", c.L1CacheTTL)
 		}
+	}
+
+	// Validate TLS configuration
+	if c.TLSEnabled && (c.TLSCert == "" || c.TLSKey == "") {
+		return fmt.Errorf("TLS enabled but cert or key file not specified")
 	}
 
 	return nil

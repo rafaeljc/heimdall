@@ -3,6 +3,7 @@
 package config
 
 import (
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -186,4 +187,16 @@ func parseAndValidateURL(rawURL string, allowedSchemes []string) (*url.URL, erro
 	}
 
 	return parsed, nil
+}
+
+// validateSHA256Hash checks if the hash is a valid SHA-256 hex string (64 hex characters)
+func validateSHA256Hash(hash string) error {
+	if len(hash) != 64 {
+		return fmt.Errorf("SHA-256 hash must be 64 characters, got %d", len(hash))
+	}
+	// Check if it's valid hexadecimal
+	if _, err := hex.DecodeString(hash); err != nil {
+		return fmt.Errorf("hash must be valid hexadecimal: %w", err)
+	}
+	return nil
 }

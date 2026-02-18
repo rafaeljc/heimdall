@@ -199,6 +199,34 @@ func TestDataPlaneConfig_Validation(t *testing.T) {
 			}),
 			wantErr: true,
 		},
+		// API Key Hash Tests
+		{
+			name: "Should fail validation when data plane API key missing in production",
+			envVars: func() map[string]string {
+				cfg := validProductionConfig()
+				delete(cfg, "HEIMDALL_SERVER_DATA_API_KEY_HASH") // Remove API key to trigger validation error
+				return cfg
+			}(),
+			wantErr: true,
+		},
+		{
+			name: "Should fail validation with invalid API key hash length in production",
+			envVars: func() map[string]string {
+				cfg := validProductionConfig()
+				cfg["HEIMDALL_SERVER_DATA_API_KEY_HASH"] = "aaaaaa" // Not 64 chars
+				return cfg
+			}(),
+			wantErr: true,
+		},
+		{
+			name: "Should fail validation with non-hex API key hash in production",
+			envVars: func() map[string]string {
+				cfg := validProductionConfig()
+				cfg["HEIMDALL_SERVER_DATA_API_KEY_HASH"] = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz" // 64 chars but not hex
+				return cfg
+			}(),
+			wantErr: true,
+		},
 		// Production-specific L1 Cache Tests
 		{
 			name: "Should fail validation with L1 cache capacity below 1000 in production",
@@ -239,6 +267,53 @@ func TestDataPlaneConfig_Validation(t *testing.T) {
 			}(),
 			want: func(t *testing.T, cfg *Config) {
 				assert.Equal(t, 10*time.Second, cfg.Server.Data.L1CacheTTL)
+			},
+			wantErr: false,
+		},
+		// TLS Configuration Tests
+		{
+			name: "Should fail validation when TLS enabled without certificates",
+			envVars: mergeEnvVars(map[string]string{
+				"HEIMDALL_SERVER_DATA_TLS_ENABLED": "true",
+			}),
+			wantErr: true,
+		},
+		{
+			name: "Should pass validation when TLS properly configured with cert and key",
+			envVars: mergeEnvVars(map[string]string{
+				"HEIMDALL_SERVER_DATA_TLS_ENABLED":   "true",
+				"HEIMDALL_SERVER_DATA_TLS_CERT_FILE": "/certs/server.crt",
+				"HEIMDALL_SERVER_DATA_TLS_KEY_FILE":  "/certs/server.key",
+			}),
+			want: func(t *testing.T, cfg *Config) {
+				assert.True(t, cfg.Server.Data.TLSEnabled)
+				assert.Equal(t, "/certs/server.crt", cfg.Server.Data.TLSCert)
+				assert.Equal(t, "/certs/server.key", cfg.Server.Data.TLSKey)
+			},
+			wantErr: false,
+		},
+		{
+			name: "Should fail validation when data plane TLS disabled in production",
+			envVars: func() map[string]string {
+				cfg := validProductionConfig()
+				cfg["HEIMDALL_SERVER_DATA_TLS_ENABLED"] = "false" // Disable TLS
+				return cfg
+			}(),
+			wantErr: true,
+		},
+		{
+			name: "Should pass validation when data plane TLS enabled in production",
+			envVars: func() map[string]string {
+				cfg := validProductionConfig()
+				cfg["HEIMDALL_SERVER_DATA_TLS_ENABLED"] = "true"
+				cfg["HEIMDALL_SERVER_DATA_TLS_CERT_FILE"] = "/certs/server.crt"
+				cfg["HEIMDALL_SERVER_DATA_TLS_KEY_FILE"] = "/certs/server.key"
+				return cfg
+			}(),
+			want: func(t *testing.T, cfg *Config) {
+				assert.True(t, cfg.Server.Data.TLSEnabled)
+				assert.Equal(t, "/certs/server.crt", cfg.Server.Data.TLSCert)
+				assert.Equal(t, "/certs/server.key", cfg.Server.Data.TLSKey)
 			},
 			wantErr: false,
 		},
