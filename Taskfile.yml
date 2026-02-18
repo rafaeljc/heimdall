@@ -78,13 +78,23 @@ tasks:
 
   # --- CODE GENERATION (generate:*) ---
   generate:proto:
-    desc: Generates Go code from .proto files
+    desc: "Lint protobuf definitions and generate code for Go (Backend) and Node.js (SDK)."
     cmds:
-      - protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative {{.PROTO_DIR}}/heimdall/v1/*.proto
+      # Ensure style compliance
+      - buf lint proto
+      
+      # Clean up old artifacts to prevent stale files
+      - find proto -name "*.pb.go" -type f -delete || true
+      - rm -rf sdks/node/src/generated/* || true
+      
+      # Generate code based on buf.gen.yaml configuration
+      - buf generate --template buf.gen.yaml proto
     sources:
-      - '{{.PROTO_DIR}}/**/*.proto'
+      - proto/**/*.proto
     generates:
-      - '{{.PROTO_DIR}}/**/*.pb.go'
+      - proto/**/*.pb.go
+      - sdks/node/src/generated/**/*.js
+    # Task caches automatically. Use 'task generate:proto --force' to rebuild without source changes.
 
   # --- SECURITY (sec:*) ---
   sec:genkey:

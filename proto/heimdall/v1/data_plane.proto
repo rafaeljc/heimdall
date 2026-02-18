@@ -7,7 +7,7 @@ option go_package = "github.com/rafaeljc/heimdall/proto/heimdall/v1";
 
 // DataPlane service is the high-performance evaluation engine.
 // It handles flag evaluation requests from client SDKs via gRPC.
-service DataPlane {
+service DataPlaneService {
   // Evaluate checks a specific flag against a user context.
   rpc Evaluate(EvaluateRequest) returns (EvaluateResponse);
 }

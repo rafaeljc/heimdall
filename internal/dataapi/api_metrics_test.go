@@ -28,7 +28,7 @@ import (
 )
 
 // setupEnvWithMetrics mirrors setupEnv but INJECTS the Observability Interceptor.
-func setupEnvWithMetrics(t *testing.T) (pb.DataPlaneClient, cache.Service, func()) {
+func setupEnvWithMetrics(t *testing.T) (pb.DataPlaneServiceClient, cache.Service, func()) {
 	t.Helper()
 
 	// 1. Silent Logger
@@ -66,7 +66,7 @@ func setupEnvWithMetrics(t *testing.T) (pb.DataPlaneClient, cache.Service, func(
 			dataapi.ObservabilityInterceptor(), // Critical for this test suite
 		),
 	)
-	pb.RegisterDataPlaneServer(s, api)
+	pb.RegisterDataPlaneServiceServer(s, api)
 
 	go func() { _ = s.Serve(lis) }()
 
@@ -79,7 +79,7 @@ func setupEnvWithMetrics(t *testing.T) (pb.DataPlaneClient, cache.Service, func(
 	)
 	require.NoError(t, err)
 
-	client := pb.NewDataPlaneClient(conn)
+	client := pb.NewDataPlaneServiceClient(conn)
 
 	cleanup := func() {
 		_ = conn.Close()
@@ -102,7 +102,7 @@ func TestApiMetrics_Integration(t *testing.T) {
 	t.Run("records grpc request metrics", func(t *testing.T) {
 		req := &pb.EvaluateRequest{FlagKey: "missing-flag"}
 		labels := map[string]string{
-			"method": "/heimdall.v1.DataPlane/Evaluate",
+			"method": "/heimdall.v1.DataPlaneService/Evaluate",
 			"code":   "NotFound",
 		}
 

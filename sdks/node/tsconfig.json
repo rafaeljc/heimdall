@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    /* Language and Environment */
+    "target": "ES2022",                       // Targets modern Node.js 24 capabilities
+    "module": "commonjs",                     // Standard for gRPC/Node.js compatibility
+    "lib": ["ES2022"],                        // Include modern JS standard library definitions
+
+    /* Output Configuration */
+    "outDir": "./dist",                       // Redirect output structure to the directory
+    "rootDir": ".",                           // Specify the root directory of input files
+    "baseUrl": "./",                          // Base directory to resolve non-relative module names
+    "declaration": true,                      // Generate .d.ts files for consumers
+    "declarationMap": true,                   // Allow IDEs to map types back to source code
+    "sourceMap": true,                        // Create source map files for debugging
+
+    /* Type Checking (Strictness is non-negotiable) */
+    "strict": true,                           // Enable all strict type-checking options
+    "noImplicitAny": true,                    // Raise error on expressions with an implied 'any' type
+    "strictNullChecks": true,                 // Ensure null/undefined are handled explicitly
+    "noUnusedLocals": true,                   // Report errors on unused locals
+    "noUnusedParameters": true,               // Report errors on unused parameters
+    "noImplicitReturns": true,                // Report error when not all code paths in function return a value
+    "noFallthroughCasesInSwitch": true,       // Report errors for fallthrough cases in switch statement
+
+    /* Interop Constraints */
+    "esModuleInterop": true,                  // Emit additional JavaScript to ease support for importing CommonJS modules
+    "resolveJsonModule": true,                // Include modules imported with .json extension
+    "skipLibCheck": true,                     // Skip type checking of declaration files
+    "forceConsistentCasingInFileNames": true, // Ensure consistent casing in file names
+
+    /* Type Definitions */
+    "types": ["node", "jest"]                 // Include type definitions for Node.js and Jest testing framework
+  },
+  "include": ["src/**/*", "tests/**/*"],
+  "exclude": ["node_modules", "dist", "coverage"]
+}
