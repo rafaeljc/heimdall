@@ -126,6 +126,7 @@ export interface HeimdallOptions {
    *
    * - Default: 60000ms (1 minute).
    * - Set to 0 to disable caching.
+   * - Must be non-negative (>= 0). Throws if negative.
    */
   cacheTTL?: number;
 
@@ -134,6 +135,7 @@ export interface HeimdallOptions {
    * Prevents memory leaks in the client application by evicting the least recently used items.
    *
    * - Default: 1000 items.
+   * - Must be a positive integer (>= 1). Throws if not a positive integer.
    */
   cacheSize?: number;
 
@@ -153,4 +155,63 @@ export interface HeimdallOptions {
    * @defaultValue Default logger (console-based)
    */
   logger?: Logger;
+}
+
+/**
+ * Validates the provided configuration options.
+ * @throws {Error} If any required option is missing or invalid.
+ */
+export function validateOptions(options: HeimdallOptions): void {
+  validateTarget(options.target);
+  validateAPIKey(options.apiKey);
+  validateCacheTTL(options.cacheTTL);
+  validateCacheSize(options.cacheSize);
+}
+
+/**
+ * Validates that the target connection string is present.
+ */
+function validateTarget(target: string): void {
+  if (!target || target.trim().length === 0) {
+    throw new Error(
+      '[Heimdall SDK] Configuration Error: "target" is required and cannot be empty.',
+    );
+  }
+}
+
+/**
+ * Validates that the API Key is present.
+ */
+function validateAPIKey(apiKey: string): void {
+  if (!apiKey || apiKey.trim().length === 0) {
+    throw new Error(
+      '[Heimdall SDK] Configuration Error: "apiKey" is required and cannot be empty.',
+    );
+  }
+}
+
+/**
+ * Validates that cacheTTL is non-negative if provided.
+ * @throws {Error} If cacheTTL is negative.
+ */
+function validateCacheTTL(cacheTTL?: number): void {
+  if (cacheTTL !== undefined && cacheTTL < 0) {
+    throw new Error(
+      '[Heimdall SDK] Configuration Error: "cacheTTL" cannot be negative. Set to 0 to disable caching.',
+    );
+  }
+}
+
+/**
+ * Validates that cacheSize is a positive integer if provided.
+ * @throws {Error} If cacheSize is not a positive number.
+ */
+function validateCacheSize(cacheSize?: number): void {
+  if (cacheSize !== undefined) {
+    if (cacheSize <= 0 || !Number.isInteger(cacheSize)) {
+      throw new Error(
+        '[Heimdall SDK] Configuration Error: "cacheSize" must be a positive integer (>= 1).',
+      );
+    }
+  }
 }

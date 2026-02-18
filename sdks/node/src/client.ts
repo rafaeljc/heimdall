@@ -8,6 +8,7 @@ import {
   Logger,
   VERSION,
   fromEvaluateResponse,
+  validateOptions,
 } from './types';
 
 // =============================================================================
@@ -41,7 +42,7 @@ export class HeimdallClient {
    */
   constructor(options: HeimdallOptions) {
     this.logger = options.logger ?? this.createDefaultLogger();
-    this.validateOptions(options);
+    validateOptions(options);
     this.timeout = this.sanitizeTimeout(options.timeout);
 
     // Pre-construct metadata with API Key and SDK version for authentication and telemetry.
@@ -89,36 +90,6 @@ export class HeimdallClient {
       // eslint-disable-next-line no-console
       error: (msg) => console.error(`${prefix} ${msg}`),
     };
-  }
-
-  /**
-   * Validates the provided configuration options.
-   */
-  private validateOptions(options: HeimdallOptions): void {
-    this.validateTarget(options.target);
-    this.validateAPIKey(options.apiKey);
-  }
-
-  /**
-   * Validates that the target connection string is present.
-   */
-  private validateTarget(target: string): void {
-    if (!target || target.trim().length === 0) {
-      throw new Error(
-        '[Heimdall SDK] Configuration Error: "target" is required and cannot be empty.',
-      );
-    }
-  }
-
-  /**
-   * Validates that the API Key is present.
-   */
-  private validateAPIKey(apiKey: string): void {
-    if (!apiKey || apiKey.trim().length === 0) {
-      throw new Error(
-        '[Heimdall SDK] Configuration Error: "apiKey" is required and cannot be empty.',
-      );
-    }
   }
 
   /**

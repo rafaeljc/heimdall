@@ -77,6 +77,105 @@ describe('HeimdallClient', () => {
           }),
       ).not.toThrow();
     });
+
+    it('should throw on negative cacheTTL', () => {
+      const mockLogger = createMockLogger();
+      expect(
+        () =>
+          new HeimdallClient({
+            target: 'localhost:50051',
+            apiKey: DUMMY_API_KEY,
+            cacheTTL: -1,
+            logger: mockLogger,
+          }),
+      ).toThrow(
+        '[Heimdall SDK] Configuration Error: "cacheTTL" cannot be negative. Set to 0 to disable caching.',
+      );
+    });
+
+    it('should accept cacheTTL of 0 (to disable cache)', () => {
+      const mockLogger = createMockLogger();
+      expect(
+        () =>
+          new HeimdallClient({
+            target: 'localhost:50051',
+            apiKey: DUMMY_API_KEY,
+            cacheTTL: 0,
+            logger: mockLogger,
+          }),
+      ).not.toThrow();
+    });
+
+    it('should accept positive cacheTTL', () => {
+      const mockLogger = createMockLogger();
+      expect(
+        () =>
+          new HeimdallClient({
+            target: 'localhost:50051',
+            apiKey: DUMMY_API_KEY,
+            cacheTTL: 60000,
+            logger: mockLogger,
+          }),
+      ).not.toThrow();
+    });
+
+    it('should throw on zero cacheSize', () => {
+      const mockLogger = createMockLogger();
+      expect(
+        () =>
+          new HeimdallClient({
+            target: 'localhost:50051',
+            apiKey: DUMMY_API_KEY,
+            cacheSize: 0,
+            logger: mockLogger,
+          }),
+      ).toThrow(
+        '[Heimdall SDK] Configuration Error: "cacheSize" must be a positive integer (>= 1).',
+      );
+    });
+
+    it('should throw on negative cacheSize', () => {
+      const mockLogger = createMockLogger();
+      expect(
+        () =>
+          new HeimdallClient({
+            target: 'localhost:50051',
+            apiKey: DUMMY_API_KEY,
+            cacheSize: -10,
+            logger: mockLogger,
+          }),
+      ).toThrow(
+        '[Heimdall SDK] Configuration Error: "cacheSize" must be a positive integer (>= 1).',
+      );
+    });
+
+    it('should throw on non-integer cacheSize (decimal)', () => {
+      const mockLogger = createMockLogger();
+      expect(
+        () =>
+          new HeimdallClient({
+            target: 'localhost:50051',
+            apiKey: DUMMY_API_KEY,
+            cacheSize: 100.5,
+            logger: mockLogger,
+          }),
+      ).toThrow(
+        '[Heimdall SDK] Configuration Error: "cacheSize" must be a positive integer (>= 1).',
+      );
+    });
+
+    it('should accept positive integer cacheSize', () => {
+      const mockLogger = createMockLogger();
+      expect(
+        () =>
+          new HeimdallClient({
+            target: 'localhost:50051',
+            apiKey: DUMMY_API_KEY,
+            cacheSize: 500,
+            logger: mockLogger,
+          }),
+      ).not.toThrow();
+    });
   });
 
   describe('Timeout Configuration', () => {
