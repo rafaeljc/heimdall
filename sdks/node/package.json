@@ -16,8 +16,20 @@
   },
   "author": "Rafael Clemente <43890345+rafaeljc@users.noreply.github.com>",
   "license": "MIT",
+  "keywords": [
+    "feature-flag",
+    "feature-flags",
+    "feature-flagging",
+    "heimdall",
+    "grpc",
+    "typescript"
+  ],
+  "homepage": "https://github.com/rafaeljc/heimdall/tree/main/sdks/node#readme",
+  "bugs": {
+    "url": "https://github.com/rafaeljc/heimdall/issues"
+  },
   "engines": {
-    "node": ">=24.13.1"
+    "node": ">=20.0.0"
   },
   "scripts": {
     "clean": "rm -rf dist coverage tsconfig.tsbuildinfo",
@@ -34,6 +46,9 @@
     "test:integration": "jest --selectProjects integration",
     "verify": "npm run lint && npm run format:check && npm run test && npm run build",
     "prepublishOnly": "npm run verify"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.11.0",
