@@ -171,7 +171,21 @@ func AuthInterceptor(expectedHash string) grpc.UnaryServerInterceptor {
 			return nil, status.Error(codes.Unauthenticated, "invalid api key")
 		}
 
-		// Step 6: Authentication successful, proceed to handler
+		// Step 6: Extract SDK information from x-heimdall-sdk header
+		// Inject into logger so all downstream logs include this context
+		sdkHeader := md.Get("x-heimdall-sdk")
+		sdkInfo := "unknown"
+		if len(sdkHeader) > 0 {
+			sdkInfo = sdkHeader[0]
+		}
+
+		// Step 7: Inject SDK info into context logger
+		// All subsequent logs (in handlers) will include this attribute
+		log := logger.FromContext(ctx)
+		log = log.With(slog.String("client_sdk", sdkInfo))
+		ctx = logger.WithContext(ctx, log)
+
+		// Step 8: Authentication successful, proceed to handler with enriched context
 		return handler(ctx, req)
 	}
 }
