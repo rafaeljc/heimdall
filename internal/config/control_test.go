@@ -8,6 +8,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	boolFalseStr = "false"
+	boolTrueStr  = "true"
+)
+
 func TestControlPlaneConfig_Validation(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -18,14 +23,14 @@ func TestControlPlaneConfig_Validation(t *testing.T) {
 		{
 			name: "Should fail validation when TLS enabled without certificates",
 			envVars: mergeEnvVars(map[string]string{
-				"HEIMDALL_SERVER_CONTROL_TLS_ENABLED": "true",
+				"HEIMDALL_SERVER_CONTROL_TLS_ENABLED": boolTrueStr,
 			}),
 			wantErr: true,
 		},
 		{
 			name: "Should pass validation when TLS properly configured with cert and key",
 			envVars: mergeEnvVars(map[string]string{
-				"HEIMDALL_SERVER_CONTROL_TLS_ENABLED":   "true",
+				"HEIMDALL_SERVER_CONTROL_TLS_ENABLED":   boolTrueStr,
 				"HEIMDALL_SERVER_CONTROL_TLS_CERT_FILE": "/certs/tls.crt",
 				"HEIMDALL_SERVER_CONTROL_TLS_KEY_FILE":  "/certs/tls.key",
 			}),
@@ -49,7 +54,7 @@ func TestControlPlaneConfig_Validation(t *testing.T) {
 			name: "Should fail validation when control plane TLS disabled in production",
 			envVars: func() map[string]string {
 				cfg := validProductionConfig()
-				cfg["HEIMDALL_SERVER_CONTROL_TLS_ENABLED"] = "false" // Disable TLS
+				cfg["HEIMDALL_SERVER_CONTROL_TLS_ENABLED"] = boolFalseStr // Disable TLS
 				return cfg
 			}(),
 			wantErr: true,
