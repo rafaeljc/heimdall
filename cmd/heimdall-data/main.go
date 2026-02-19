@@ -94,7 +94,7 @@ func run() error {
 	redisCache := cache.NewRedisCache(redisClient)
 
 	// Initialize the gRPC API implementation
-	api, err := dataapi.NewAPI(log, memoryCache, redisCache, engine)
+	api, err := dataapi.NewAPI(log, memoryCache, redisCache, engine, cfg.Server.Data.APIKeyHash)
 	if err != nil {
 		redisClient.Close()
 		return fmt.Errorf("failed to initialize data api: %w", err)
@@ -120,18 +120,9 @@ func run() error {
 		return fmt.Errorf("failed to bind port %s: %w", cfg.Server.Data.Port, err)
 	}
 
-	// Define Server Options (Interceptors)
-	// Order matters in ChainUnaryInterceptor:
-	// 1. RequestLoggerInterceptor: Sets up Context (RequestID, Logger) & Logs outcome.
-	// 2. ObservabilityInterceptor: Measures metrics (Duration, Count).
-	//
-	// We want the logger outer-most to trace the entire request lifecycle,
-	// including any potential overhead from the observability layer itself.
+	// Define Server Options
 	opts := []grpc.ServerOption{
-		grpc.ChainUnaryInterceptor(
-			dataapi.RequestLoggerInterceptor(),
-			dataapi.ObservabilityInterceptor(),
-		),
+		api.InterceptorChain,
 	}
 
 	// Initialize the gRPC Server
