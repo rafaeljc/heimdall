@@ -2,7 +2,11 @@ package dataapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -80,6 +84,109 @@ func RequestLoggerInterceptor() grpc.UnaryServerInterceptor {
 		)
 
 		return resp, err
+	}
+}
+
+// AuthInterceptor returns a UnaryServerInterceptor that enforces API key authentication.
+//
+// Authentication Mechanism:
+// The interceptor validates incoming requests using Bearer token authentication.
+// The client must provide an Authorization header in the format:
+//
+//	Authorization: Bearer <api-key>
+//
+// The provided api-key is hashed using SHA-256 and compared against expectedHash
+// using constant-time comparison to prevent timing attacks.
+//
+// Parameters:
+//
+//	expectedHash: The SHA-256 hash of the valid API key in hexadecimal format.
+//	             This should be pre-computed server-side and stored securely.
+//	             Example: sha256("my-secret-key") = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+//
+// Security Features:
+//   - Constant-time comparison (subtle.ConstantTimeCompare) prevents timing attacks
+//   - Bearer token validation ensures standard format compliance
+//   - Detailed internal logging for debugging while returning generic error messages
+//     to clients to avoid information disclosure
+//
+// Middleware Integration:
+// This interceptor should be registered in the gRPC server options AFTER RequestLoggerInterceptor
+// so that authentication failure logs are properly correlated with the request ID:
+//
+//	grpc.ChainUnaryInterceptor(
+//	    dataapi.RequestLoggerInterceptor(),    // Outer: Injects RequestID and Logger
+//	    dataapi.AuthInterceptor(expectedHash), // Middle: Validates authentication
+//	    dataapi.ObservabilityInterceptor(),    // Inner: Collects metrics
+//	)
+//
+// Error Responses:
+//   - Unauthenticated (missing metadata): No Authorization header was sent
+//   - Unauthenticated (invalid format): Authorization header doesn't follow "Bearer <token>" format
+//   - Unauthenticated (empty token): Bearer token is empty or whitespace
+//   - Unauthenticated (invalid key): The provided key doesn't match the expected hash
+func AuthInterceptor(expectedHash string) grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		// Step 1: Extract metadata from incoming gRPC request
+		// In gRPC, HTTP headers are exposed as metadata.
+		md, ok := metadata.FromIncomingContext(ctx)
+		if !ok {
+			return nil, status.Error(codes.Unauthenticated, "missing metadata")
+		}
+
+		// Step 2: Retrieve the Authorization header
+		// Metadata keys are normalized to lowercase by gRPC.
+		authHeader := md.Get("authorization")
+		if len(authHeader) == 0 || authHeader[0] == "" {
+			return nil, status.Error(codes.Unauthenticated, "authorization header is required")
+		}
+
+		// Step 3: Validate Bearer token format
+		// We expect: "Bearer <api-key>"
+		tokenStr := authHeader[0]
+		if !strings.HasPrefix(tokenStr, "Bearer ") {
+			return nil, status.Error(codes.Unauthenticated, "invalid authorization format: expected Bearer token")
+		}
+
+		// Step 4: Extract and validate the token itself
+		clientKey := strings.TrimPrefix(tokenStr, "Bearer ")
+		if clientKey == "" {
+			return nil, status.Error(codes.Unauthenticated, "bearer token is empty")
+		}
+
+		// Step 5: Hash the provided key and compare
+		// We use SHA-256 to hash the client-provided key, then compare it against
+		// the expectedHash using constant-time comparison.
+		// This prevents attackers from using timing differences to infer the correct key.
+		hash := sha256.Sum256([]byte(clientKey))
+		clientHashHex := hex.EncodeToString(hash[:])
+
+		// subtle.ConstantTimeCompare returns 1 if equal, 0 if different.
+		if subtle.ConstantTimeCompare([]byte(clientHashHex), []byte(expectedHash)) != 1 {
+			log := logger.FromContext(ctx)
+			log.Warn("authentication failed: invalid api key in bearer token",
+				slog.String("method", info.FullMethod),
+			)
+
+			return nil, status.Error(codes.Unauthenticated, "invalid api key")
+		}
+
+		// Step 6: Extract SDK information from x-heimdall-sdk header
+		// Inject into logger so all downstream logs include this context
+		sdkHeader := md.Get("x-heimdall-sdk")
+		sdkInfo := "unknown"
+		if len(sdkHeader) > 0 {
+			sdkInfo = sdkHeader[0]
+		}
+
+		// Step 7: Inject SDK info into context logger
+		// All subsequent logs (in handlers) will include this attribute
+		log := logger.FromContext(ctx)
+		log = log.With(slog.String("client_sdk", sdkInfo))
+		ctx = logger.WithContext(ctx, log)
+
+		// Step 8: Authentication successful, proceed to handler with enriched context
+		return handler(ctx, req)
 	}
 }
 

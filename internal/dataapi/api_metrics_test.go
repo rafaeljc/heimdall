@@ -55,7 +55,7 @@ func setupEnvWithMetrics(t *testing.T) (pb.DataPlaneServiceClient, cache.Service
 	l1, err := cache.NewMemoryCache(dataConfig.L1CacheCapacity, dataConfig.L1CacheTTL)
 	require.NoError(t, err)
 
-	api, err := dataapi.NewAPI(log, l1, l2, engine)
+	api, err := dataapi.NewAPIWithConfig(log, l1, l2, engine, "", true)
 	require.NoError(t, err)
 
 	// 4. gRPC Server WITH INTERCEPTORS

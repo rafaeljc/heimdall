@@ -33,6 +33,10 @@ export HEIMDALL_SERVER_CONTROL_API_KEY_HASH=<sha256-hash>
 export HEIMDALL_SERVER_CONTROL_TLS_ENABLED=true
 export HEIMDALL_SERVER_CONTROL_TLS_CERT_FILE=/certs/tls.crt
 export HEIMDALL_SERVER_CONTROL_TLS_KEY_FILE=/certs/tls.key
+export HEIMDALL_SERVER_DATA_API_KEY_HASH=<sha256-hash>
+export HEIMDALL_SERVER_DATA_TLS_ENABLED=true
+export HEIMDALL_SERVER_DATA_TLS_CERT_FILE=/certs/tls.crt
+export HEIMDALL_SERVER_DATA_TLS_KEY_FILE=/certs/tls.key
 ```
 
 ## Environment Variables
@@ -76,6 +80,10 @@ export HEIMDALL_SERVER_CONTROL_TLS_KEY_FILE=/certs/tls.key
 | `HEIMDALL_SERVER_DATA_MAX_CONNECTION_AGE` | `300s` | - |
 | `HEIMDALL_SERVER_DATA_L1_CACHE_CAPACITY` | `10000` | In-memory cache size, ≥1000 in production |
 | `HEIMDALL_SERVER_DATA_L1_CACHE_TTL` | `60s` | In-memory cache TTL, ≥10s in production |
+| `HEIMDALL_SERVER_DATA_API_KEY_HASH` | - | SHA-256 hash, required in production |
+| `HEIMDALL_SERVER_DATA_TLS_ENABLED` | `false` | Required in production |
+| `HEIMDALL_SERVER_DATA_TLS_CERT_FILE` | - | Required if TLS enabled |
+| `HEIMDALL_SERVER_DATA_TLS_KEY_FILE` | - | Required if TLS enabled |
 
 ### Database
 
@@ -151,3 +159,5 @@ When `HEIMDALL_APP_ENV=production`:
 - Control plane TLS: enabled
 - Data plane L1 cache capacity: ≥1000
 - Data plane L1 cache TTL: ≥10s
+- Data plane API key hash: required
+- Data plane TLS: enabled

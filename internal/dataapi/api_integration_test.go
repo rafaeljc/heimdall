@@ -78,7 +78,7 @@ func setupEnv(t *testing.T) (pb.DataPlaneServiceClient, cache.Service, func()) {
 	require.NoError(t, err)
 
 	// API Server (System Under Test)
-	api, err := dataapi.NewAPI(log, l1, l2, engine)
+	api, err := dataapi.NewAPIWithConfig(log, l1, l2, engine, "", true)
 	require.NoError(t, err)
 
 	// 4. In-Memory Networking (bufconn)
@@ -283,5 +283,181 @@ func TestDataPlane_Integration_Scenarios(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, resp.Value, "Should return false because flag is disabled")
 		assert.Equal(t, "DISABLED", resp.Reason, "Reason should reflect the disabled state")
+	})
+}
+
+// TestNewAPIValidation_Integration validates the factory method validation behavior.
+// It ensures that constructors properly validate input parameters and panic with appropriate messages.
+func TestNewAPIValidation_Integration(t *testing.T) {
+	ctx := context.Background()
+
+	// Setup shared infrastructure
+	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	// Create test containers
+	redisContainer, err := testsupport.StartRedisContainer(ctx)
+	require.NoError(t, err, "failed to start redis container")
+	defer func() {
+		_ = redisContainer.Terminate(context.Background())
+	}()
+
+	// Parse Redis endpoint
+	endpoint, err := redisContainer.Container.PortEndpoint(ctx, "6379/tcp", "")
+	require.NoError(t, err)
+	host, port, _ := strings.Cut(endpoint, ":")
+	redisConfig := &config.RedisConfig{
+		Host:           host,
+		Port:           port,
+		PingMaxRetries: 5,
+		PingBackoff:    2 * time.Second,
+	}
+	redisClient, err := cache.NewRedisClient(ctx, redisConfig)
+	require.NoError(t, err)
+	defer func() {
+		_ = redisClient.Close()
+	}()
+
+	l2 := cache.NewRedisCache(redisClient)
+	engine := ruleengine.New(log)
+
+	dataConfig := &config.DataPlaneConfig{
+		L1CacheCapacity: 1000,
+		L1CacheTTL:      30 * time.Second,
+	}
+	l1, err := cache.NewMemoryCache(dataConfig.L1CacheCapacity, dataConfig.L1CacheTTL)
+	require.NoError(t, err)
+
+	validHash := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" // Valid SHA-256 hash
+
+	t.Run("NewAPI should panic when l1 cache is nil", func(t *testing.T) {
+		defer func() {
+			r := recover()
+			require.NotNil(t, r, "NewAPI should panic when l1 is nil")
+			assert.Contains(t, r.(string), "memory cache cannot be nil")
+		}()
+
+		_, _ = dataapi.NewAPI(log, nil, l2, engine, validHash)
+	})
+
+	t.Run("NewAPI should panic when l2 cache is nil", func(t *testing.T) {
+		defer func() {
+			r := recover()
+			require.NotNil(t, r, "NewAPI should panic when l2 is nil")
+			assert.Contains(t, r.(string), "cache service cannot be nil")
+		}()
+
+		_, _ = dataapi.NewAPI(log, l1, nil, engine, validHash)
+	})
+
+	t.Run("NewAPI should panic when engine is nil", func(t *testing.T) {
+		defer func() {
+			r := recover()
+			require.NotNil(t, r, "NewAPI should panic when engine is nil")
+			assert.Contains(t, r.(string), "rule engine cannot be nil")
+		}()
+
+		_, _ = dataapi.NewAPI(log, l1, l2, nil, validHash)
+	})
+
+	t.Run("NewAPI should panic when apiKeyHash is empty", func(t *testing.T) {
+		defer func() {
+			r := recover()
+			require.NotNil(t, r, "NewAPI should panic when apiKeyHash is empty")
+			assert.Contains(t, r.(string), "apiKeyHash cannot be empty when authentication is enabled")
+		}()
+
+		_, _ = dataapi.NewAPI(log, l1, l2, engine, "")
+	})
+
+	t.Run("NewAPI should succeed with valid parameters", func(t *testing.T) {
+		api, err := dataapi.NewAPI(log, l1, l2, engine, validHash)
+		defer func() {
+			if api != nil {
+				api.Close()
+			}
+		}()
+
+		require.NoError(t, err)
+		require.NotNil(t, api)
+		assert.NotNil(t, api.InterceptorChain, "InterceptorChain should be configured")
+	})
+
+	t.Run("NewAPIWithConfig should panic when l1 is nil", func(t *testing.T) {
+		defer func() {
+			r := recover()
+			require.NotNil(t, r, "NewAPIWithConfig should panic when l1 is nil")
+			assert.Contains(t, r.(string), "memory cache cannot be nil")
+		}()
+
+		_, _ = dataapi.NewAPIWithConfig(log, nil, l2, engine, validHash, false)
+	})
+
+	t.Run("NewAPIWithConfig should panic when l2 is nil", func(t *testing.T) {
+		defer func() {
+			r := recover()
+			require.NotNil(t, r, "NewAPIWithConfig should panic when l2 is nil")
+			assert.Contains(t, r.(string), "cache service cannot be nil")
+		}()
+
+		_, _ = dataapi.NewAPIWithConfig(log, l1, nil, engine, validHash, false)
+	})
+
+	t.Run("NewAPIWithConfig should panic when engine is nil", func(t *testing.T) {
+		defer func() {
+			r := recover()
+			require.NotNil(t, r, "NewAPIWithConfig should panic when engine is nil")
+			assert.Contains(t, r.(string), "rule engine cannot be nil")
+		}()
+
+		_, _ = dataapi.NewAPIWithConfig(log, l1, l2, nil, validHash, false)
+	})
+
+	t.Run("NewAPIWithConfig should panic when skipAuth=false and apiKeyHash is empty", func(t *testing.T) {
+		defer func() {
+			r := recover()
+			require.NotNil(t, r, "NewAPIWithConfig should panic when skipAuth=false and apiKeyHash is empty")
+			assert.Contains(t, r.(string), "apiKeyHash cannot be empty when authentication is enabled")
+		}()
+
+		_, _ = dataapi.NewAPIWithConfig(log, l1, l2, engine, "", false)
+	})
+
+	t.Run("NewAPIWithConfig should succeed with skipAuth=true and empty apiKeyHash", func(t *testing.T) {
+		api, err := dataapi.NewAPIWithConfig(log, l1, l2, engine, "", true)
+		defer func() {
+			if api != nil {
+				api.Close()
+			}
+		}()
+
+		require.NoError(t, err)
+		require.NotNil(t, api)
+		assert.NotNil(t, api.InterceptorChain, "InterceptorChain should be configured")
+	})
+
+	t.Run("NewAPIWithConfig should succeed with skipAuth=false and valid apiKeyHash", func(t *testing.T) {
+		api, err := dataapi.NewAPIWithConfig(log, l1, l2, engine, validHash, false)
+		defer func() {
+			if api != nil {
+				api.Close()
+			}
+		}()
+
+		require.NoError(t, err)
+		require.NotNil(t, api)
+		assert.NotNil(t, api.InterceptorChain, "InterceptorChain should be configured with auth enabled")
+	})
+
+	t.Run("NewAPIWithConfig should succeed with skipAuth=true and valid apiKeyHash", func(t *testing.T) {
+		api, err := dataapi.NewAPIWithConfig(log, l1, l2, engine, validHash, true)
+		defer func() {
+			if api != nil {
+				api.Close()
+			}
+		}()
+
+		require.NoError(t, err)
+		require.NotNil(t, api)
+		assert.NotNil(t, api.InterceptorChain, "InterceptorChain should be configured with auth disabled")
 	})
 }

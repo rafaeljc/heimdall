@@ -72,7 +72,7 @@ To spin up the entire application (Databases + Services + Docs):
 # 1. Clone the repository
 git clone https://github.com/rafaeljc/heimdall.git && cd heimdall
 
-# 2. Copy the example environment file
+# 2. Copy the example environment file and edit the API Key hash values
 cp .env.example .env
 
 # 3. Start the environment

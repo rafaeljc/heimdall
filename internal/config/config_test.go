@@ -56,6 +56,12 @@ func validProductionConfig() map[string]string {
 		"HEIMDALL_SERVER_CONTROL_TLS_ENABLED":   "true",
 		"HEIMDALL_SERVER_CONTROL_TLS_CERT_FILE": "/certs/control-cert.pem",
 		"HEIMDALL_SERVER_CONTROL_TLS_KEY_FILE":  "/certs/control-key.pem",
+
+		// Data Plane
+		"HEIMDALL_SERVER_DATA_API_KEY_HASH":  "5dec7e1c36e8ec7f526cfa8ff6dc788daad76f6dd34467662eb47990dca6b55d",
+		"HEIMDALL_SERVER_DATA_TLS_ENABLED":   "true",
+		"HEIMDALL_SERVER_DATA_TLS_CERT_FILE": "/certs/data-cert.pem",
+		"HEIMDALL_SERVER_DATA_TLS_KEY_FILE":  "/certs/data-key.pem",
 	}
 }
 
