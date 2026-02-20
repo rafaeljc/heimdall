@@ -17,6 +17,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 
 	"github.com/rafaeljc/heimdall/internal/cache"
@@ -125,6 +126,18 @@ func run() error {
 	// Define Server Options
 	opts := []grpc.ServerOption{
 		api.InterceptorChain,
+		// Keepalive and connection lifecycle settings
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:                  cfg.Server.Data.KeepaliveTime,
+			Timeout:               cfg.Server.Data.KeepaliveTimeout,
+			MaxConnectionAge:      cfg.Server.Data.MaxConnectionAge,
+			MaxConnectionAgeGrace: cfg.Server.Data.MaxConnectionAgeGrace,
+			MaxConnectionIdle:     cfg.Server.Data.MaxConnectionIdle,
+		}),
+		// Resource limits
+		grpc.MaxRecvMsgSize(cfg.Server.Data.MaxRecvMsgSize),
+		grpc.MaxSendMsgSize(cfg.Server.Data.MaxSendMsgSize),
+		grpc.MaxConcurrentStreams(cfg.Server.Data.MaxConcurrentStreams),
 	}
 
 	// Configure TLS if enabled

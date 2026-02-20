@@ -74,11 +74,14 @@ export HEIMDALL_SERVER_DATA_TLS_KEY_FILE=/certs/tls.key
 |----------|---------|-------|
 | `HEIMDALL_SERVER_DATA_PORT` | `50051` | - |
 | `HEIMDALL_SERVER_DATA_HOST` | `0.0.0.0` | - |
-| `HEIMDALL_SERVER_DATA_KEEPALIVE_TIME` | `20s` | - |
-| `HEIMDALL_SERVER_DATA_KEEPALIVE_TIMEOUT` | `3s` | - |
-| `HEIMDALL_SERVER_DATA_MAX_CONNECTION_AGE` | `300s` | - |
-| `HEIMDALL_SERVER_DATA_MAX_CONNECTION_AGE_GRACE` | `10s` | - |
-| `HEIMDALL_SERVER_DATA_MAX_CONNECTION_IDLE` | `120s` | - |
+| `HEIMDALL_SERVER_DATA_KEEPALIVE_TIME` | `20s` | Dead connection detection interval |
+| `HEIMDALL_SERVER_DATA_KEEPALIVE_TIMEOUT` | `3s` | Keepalive probe timeout |
+| `HEIMDALL_SERVER_DATA_MAX_CONNECTION_AGE` | `300s` | Maximum connection lifetime |
+| `HEIMDALL_SERVER_DATA_MAX_CONNECTION_AGE_GRACE` | `10s` | Graceful shutdown period |
+| `HEIMDALL_SERVER_DATA_MAX_CONNECTION_IDLE` | `120s` | Connection idle timeout |
+| `HEIMDALL_SERVER_DATA_MAX_RECV_MSG_SIZE` | `262144` | Max message size to receive (bytes), min 1 |
+| `HEIMDALL_SERVER_DATA_MAX_SEND_MSG_SIZE` | `262144` | Max message size to send (bytes), min 1 |
+| `HEIMDALL_SERVER_DATA_MAX_CONCURRENT_STREAMS` | `20` | Concurrent streams per connection, min 1 |
 | `HEIMDALL_SERVER_DATA_L1_CACHE_CAPACITY` | `10000` | In-memory cache size, ≥1000 in production |
 | `HEIMDALL_SERVER_DATA_L1_CACHE_TTL` | `60s` | In-memory cache TTL, ≥10s in production |
 | `HEIMDALL_SERVER_DATA_API_KEY_HASH` | - | SHA-256 hash, required in production |

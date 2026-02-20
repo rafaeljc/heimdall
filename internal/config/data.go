@@ -16,6 +16,9 @@ type DataPlaneConfig struct {
 	MaxConnectionAge      time.Duration `envconfig:"MAX_CONNECTION_AGE" default:"300s"`
 	MaxConnectionAgeGrace time.Duration `envconfig:"MAX_CONNECTION_AGE_GRACE" default:"10s"`
 	MaxConnectionIdle     time.Duration `envconfig:"MAX_CONNECTION_IDLE" default:"120s"`
+	MaxRecvMsgSize        int           `envconfig:"MAX_RECV_MSG_SIZE" default:"262144" validate:"min=1"`  // 256KB
+	MaxSendMsgSize        int           `envconfig:"MAX_SEND_MSG_SIZE" default:"262144" validate:"min=1"`  // 256KB
+	MaxConcurrentStreams  uint32        `envconfig:"MAX_CONCURRENT_STREAMS" default:"20" validate:"min=1"` // 20 concurrent streams
 
 	// L1 Cache configuration (in-memory cache layer)
 	L1CacheCapacity int           `envconfig:"L1_CACHE_CAPACITY" default:"10000" validate:"min=1"`

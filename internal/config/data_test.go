@@ -104,6 +104,9 @@ func TestDataPlaneConfig_Validation(t *testing.T) {
 				assert.Equal(t, 300*time.Second, cfg.Server.Data.MaxConnectionAge)
 				assert.Equal(t, 10*time.Second, cfg.Server.Data.MaxConnectionAgeGrace)
 				assert.Equal(t, 120*time.Second, cfg.Server.Data.MaxConnectionIdle)
+				assert.Equal(t, 262144, cfg.Server.Data.MaxRecvMsgSize) // 256KB
+				assert.Equal(t, 262144, cfg.Server.Data.MaxSendMsgSize) // 256KB
+				assert.Equal(t, uint32(20), cfg.Server.Data.MaxConcurrentStreams)
 				assert.Equal(t, 10000, cfg.Server.Data.L1CacheCapacity)
 				assert.Equal(t, 60*time.Second, cfg.Server.Data.L1CacheTTL)
 			},
@@ -319,6 +322,56 @@ func TestDataPlaneConfig_Validation(t *testing.T) {
 				assert.Equal(t, "/certs/server.key", cfg.Server.Data.TLSKey)
 			},
 			wantErr: false,
+		},
+		// gRPC Resource Limits Tests
+		{
+			name: "Should pass validation with custom gRPC resource limits",
+			envVars: mergeEnvVars(map[string]string{
+				"HEIMDALL_SERVER_DATA_MAX_RECV_MSG_SIZE":       "524288",
+				"HEIMDALL_SERVER_DATA_MAX_SEND_MSG_SIZE":       "1048576",
+				"HEIMDALL_SERVER_DATA_MAX_CONCURRENT_STREAMS":  "50",
+			}),
+			want: func(t *testing.T, cfg *Config) {
+				assert.Equal(t, 524288, cfg.Server.Data.MaxRecvMsgSize)     // 512KB
+				assert.Equal(t, 1048576, cfg.Server.Data.MaxSendMsgSize)    // 1MB
+				assert.Equal(t, uint32(50), cfg.Server.Data.MaxConcurrentStreams)
+			},
+			wantErr: false,
+		},
+		{
+			name: "Should pass validation with minimum valid gRPC resource limits",
+			envVars: mergeEnvVars(map[string]string{
+				"HEIMDALL_SERVER_DATA_MAX_RECV_MSG_SIZE":       "1",
+				"HEIMDALL_SERVER_DATA_MAX_SEND_MSG_SIZE":       "1",
+				"HEIMDALL_SERVER_DATA_MAX_CONCURRENT_STREAMS":  "1",
+			}),
+			want: func(t *testing.T, cfg *Config) {
+				assert.Equal(t, 1, cfg.Server.Data.MaxRecvMsgSize)
+				assert.Equal(t, 1, cfg.Server.Data.MaxSendMsgSize)
+				assert.Equal(t, uint32(1), cfg.Server.Data.MaxConcurrentStreams)
+			},
+			wantErr: false,
+		},
+		{
+			name: "Should fail validation with MaxRecvMsgSize of 0",
+			envVars: mergeEnvVars(map[string]string{
+				"HEIMDALL_SERVER_DATA_MAX_RECV_MSG_SIZE": "0",
+			}),
+			wantErr: true,
+		},
+		{
+			name: "Should fail validation with MaxSendMsgSize of 0",
+			envVars: mergeEnvVars(map[string]string{
+				"HEIMDALL_SERVER_DATA_MAX_SEND_MSG_SIZE": "0",
+			}),
+			wantErr: true,
+		},
+		{
+			name: "Should fail validation with MaxConcurrentStreams of 0",
+			envVars: mergeEnvVars(map[string]string{
+				"HEIMDALL_SERVER_DATA_MAX_CONCURRENT_STREAMS": "0",
+			}),
+			wantErr: true,
 		},
 	}
 
