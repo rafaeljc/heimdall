@@ -99,10 +99,11 @@ func TestDataPlaneConfig_Validation(t *testing.T) {
 			want: func(t *testing.T, cfg *Config) {
 				assert.Equal(t, "50051", cfg.Server.Data.Port)
 				assert.Equal(t, "0.0.0.0", cfg.Server.Data.Host)
-				assert.Equal(t, uint32(100), cfg.Server.Data.MaxConcurrentStreams)
-				assert.Equal(t, 120*time.Second, cfg.Server.Data.KeepaliveTime)
-				assert.Equal(t, 20*time.Second, cfg.Server.Data.KeepaliveTimeout)
+				assert.Equal(t, 20*time.Second, cfg.Server.Data.KeepaliveTime)
+				assert.Equal(t, 3*time.Second, cfg.Server.Data.KeepaliveTimeout)
 				assert.Equal(t, 300*time.Second, cfg.Server.Data.MaxConnectionAge)
+				assert.Equal(t, 10*time.Second, cfg.Server.Data.MaxConnectionAgeGrace)
+				assert.Equal(t, 120*time.Second, cfg.Server.Data.MaxConnectionIdle)
 				assert.Equal(t, 10000, cfg.Server.Data.L1CacheCapacity)
 				assert.Equal(t, 60*time.Second, cfg.Server.Data.L1CacheTTL)
 			},
@@ -111,16 +112,18 @@ func TestDataPlaneConfig_Validation(t *testing.T) {
 		{
 			name: "Should pass validation with custom gRPC settings",
 			envVars: mergeEnvVars(map[string]string{
-				"HEIMDALL_SERVER_DATA_MAX_CONCURRENT_STREAMS": "200",
-				"HEIMDALL_SERVER_DATA_KEEPALIVE_TIME":         "60s",
-				"HEIMDALL_SERVER_DATA_KEEPALIVE_TIMEOUT":      "10s",
-				"HEIMDALL_SERVER_DATA_MAX_CONNECTION_AGE":     "600s",
+				"HEIMDALL_SERVER_DATA_KEEPALIVE_TIME":           "60s",
+				"HEIMDALL_SERVER_DATA_KEEPALIVE_TIMEOUT":        "10s",
+				"HEIMDALL_SERVER_DATA_MAX_CONNECTION_AGE":       "600s",
+				"HEIMDALL_SERVER_DATA_MAX_CONNECTION_AGE_GRACE": "15s",
+				"HEIMDALL_SERVER_DATA_MAX_CONNECTION_IDLE":      "180s",
 			}),
 			want: func(t *testing.T, cfg *Config) {
-				assert.Equal(t, uint32(200), cfg.Server.Data.MaxConcurrentStreams)
 				assert.Equal(t, 60*time.Second, cfg.Server.Data.KeepaliveTime)
 				assert.Equal(t, 10*time.Second, cfg.Server.Data.KeepaliveTimeout)
 				assert.Equal(t, 600*time.Second, cfg.Server.Data.MaxConnectionAge)
+				assert.Equal(t, 15*time.Second, cfg.Server.Data.MaxConnectionAgeGrace)
+				assert.Equal(t, 180*time.Second, cfg.Server.Data.MaxConnectionIdle)
 			},
 			wantErr: false,
 		},
