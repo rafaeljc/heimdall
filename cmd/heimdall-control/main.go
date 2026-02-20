@@ -20,6 +20,7 @@ import (
 	"github.com/rafaeljc/heimdall/internal/database"
 	"github.com/rafaeljc/heimdall/internal/logger"
 	"github.com/rafaeljc/heimdall/internal/observability"
+	"github.com/rafaeljc/heimdall/internal/security"
 	"github.com/rafaeljc/heimdall/internal/store"
 )
 
@@ -135,11 +136,39 @@ func run() error {
 	// Start the HTTP server in a separate goroutine so it doesn't block the main thread.
 	// We use a buffered error channel to capture any startup failures (e.g., port closed after bind).
 	errChan := make(chan error, 1)
-	go func() {
-		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
-			errChan <- fmt.Errorf("failed to serve: %w", err)
+
+	// Configure TLS if enabled
+	if cfg.Server.Control.TLSEnabled {
+		loader, err := security.NewTLSLoader(
+			cfg.Server.Control.TLSCert,
+			cfg.Server.Control.TLSKey,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to load TLS credentials: %w", err)
 		}
-	}()
+
+		tlsConfig, err := loader.LoadConfig()
+		if err != nil {
+			return fmt.Errorf("failed to configure TLS: %w", err)
+		}
+
+		server.TLSConfig = tlsConfig
+		log.Info("https enabled", slog.String("cert_file", cfg.Server.Control.TLSCert))
+
+		// Serve with TLS (certs already in server.TLSConfig)
+		go func() {
+			if err := server.ServeTLS(listener, "", ""); err != nil && err != http.ErrServerClosed {
+				errChan <- fmt.Errorf("failed to serve https: %w", err)
+			}
+		}()
+	} else {
+		// Serve without TLS
+		go func() {
+			if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+				errChan <- fmt.Errorf("failed to serve http: %w", err)
+			}
+		}()
+	}
 
 	// -------------------------------------------------------------------------
 	// 4. Graceful Shutdown

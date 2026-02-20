@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/reflection"
 
 	"github.com/rafaeljc/heimdall/internal/cache"
@@ -24,6 +25,7 @@ import (
 	"github.com/rafaeljc/heimdall/internal/logger"
 	"github.com/rafaeljc/heimdall/internal/observability"
 	"github.com/rafaeljc/heimdall/internal/ruleengine"
+	"github.com/rafaeljc/heimdall/internal/security"
 )
 
 // main is the application entrypoint.
@@ -123,6 +125,30 @@ func run() error {
 	// Define Server Options
 	opts := []grpc.ServerOption{
 		api.InterceptorChain,
+	}
+
+	// Configure TLS if enabled
+	if cfg.Server.Data.TLSEnabled {
+		loader, err := security.NewTLSLoader(
+			cfg.Server.Data.TLSCert,
+			cfg.Server.Data.TLSKey,
+		)
+		if err != nil {
+			api.Close()
+			redisClient.Close()
+			return fmt.Errorf("failed to load TLS credentials: %w", err)
+		}
+
+		tlsConfig, err := loader.LoadConfig()
+		if err != nil {
+			api.Close()
+			redisClient.Close()
+			return fmt.Errorf("failed to configure TLS: %w", err)
+		}
+
+		creds := credentials.NewTLS(tlsConfig)
+		opts = append(opts, grpc.Creds(creds))
+		log.Info("grpc tls enabled", slog.String("cert_file", cfg.Server.Data.TLSCert))
 	}
 
 	// Initialize the gRPC Server
