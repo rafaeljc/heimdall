@@ -327,13 +327,13 @@ func TestDataPlaneConfig_Validation(t *testing.T) {
 		{
 			name: "Should pass validation with custom gRPC resource limits",
 			envVars: mergeEnvVars(map[string]string{
-				"HEIMDALL_SERVER_DATA_MAX_RECV_MSG_SIZE":       "524288",
-				"HEIMDALL_SERVER_DATA_MAX_SEND_MSG_SIZE":       "1048576",
-				"HEIMDALL_SERVER_DATA_MAX_CONCURRENT_STREAMS":  "50",
+				"HEIMDALL_SERVER_DATA_MAX_RECV_MSG_SIZE":      "524288",
+				"HEIMDALL_SERVER_DATA_MAX_SEND_MSG_SIZE":      "1048576",
+				"HEIMDALL_SERVER_DATA_MAX_CONCURRENT_STREAMS": "50",
 			}),
 			want: func(t *testing.T, cfg *Config) {
-				assert.Equal(t, 524288, cfg.Server.Data.MaxRecvMsgSize)     // 512KB
-				assert.Equal(t, 1048576, cfg.Server.Data.MaxSendMsgSize)    // 1MB
+				assert.Equal(t, 524288, cfg.Server.Data.MaxRecvMsgSize)  // 512KB
+				assert.Equal(t, 1048576, cfg.Server.Data.MaxSendMsgSize) // 1MB
 				assert.Equal(t, uint32(50), cfg.Server.Data.MaxConcurrentStreams)
 			},
 			wantErr: false,
@@ -341,9 +341,9 @@ func TestDataPlaneConfig_Validation(t *testing.T) {
 		{
 			name: "Should pass validation with minimum valid gRPC resource limits",
 			envVars: mergeEnvVars(map[string]string{
-				"HEIMDALL_SERVER_DATA_MAX_RECV_MSG_SIZE":       "1",
-				"HEIMDALL_SERVER_DATA_MAX_SEND_MSG_SIZE":       "1",
-				"HEIMDALL_SERVER_DATA_MAX_CONCURRENT_STREAMS":  "1",
+				"HEIMDALL_SERVER_DATA_MAX_RECV_MSG_SIZE":      "1",
+				"HEIMDALL_SERVER_DATA_MAX_SEND_MSG_SIZE":      "1",
+				"HEIMDALL_SERVER_DATA_MAX_CONCURRENT_STREAMS": "1",
 			}),
 			want: func(t *testing.T, cfg *Config) {
 				assert.Equal(t, 1, cfg.Server.Data.MaxRecvMsgSize)
