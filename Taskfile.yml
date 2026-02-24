@@ -13,6 +13,14 @@ tasks:
     cmds:
       - task --list
 
+  # --- INFRASTRUCTURE (infra:*) ---
+  infra:bootstrap:
+    desc: "Initialize Heimdall bootstrap layer (one-time setup)"
+    dir: infra/terraform/bootstrap
+    cmds:
+      - chmod +x setup.sh
+      - ./setup.sh
+
   # --- DEVELOPMENT WORKFLOW (dev:*) ---
   dev:up:
     desc: Starts the local environment (builds images and starts containers)
