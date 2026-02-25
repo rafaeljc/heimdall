@@ -122,7 +122,7 @@ echo ""
 # 2. Preparation
 # -----------------------------------------------------------------------------
 log_info "Cleaning up any existing backend configurations..."
-rm -f backend.hcl
+rm -f backend.tf
 log_info "Initializing Terraform (using local state)..."
 terraform init -input=false
 

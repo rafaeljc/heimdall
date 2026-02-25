@@ -29,7 +29,7 @@ terraform {
 
 provider "aws" {
   region = var.aws_region
-  
+
   default_tags {
     tags = {
       Project     = "Heimdall"
@@ -65,7 +65,7 @@ resource "aws_s3_bucket" "terraform_state" {
 # Maintains a complete history of state file changes for recovery and auditing
 resource "aws_s3_bucket_versioning" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state.id
-  
+
   versioning_configuration {
     status = "Enabled"
   }
@@ -76,7 +76,7 @@ resource "aws_s3_bucket_versioning" "terraform_state" {
 # This ensures sensitive data (passwords, keys, IDs) are protected
 resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state.id
-  
+
   rule {
     apply_server_side_encryption_by_default {
       sse_algorithm = "AES256"
@@ -142,8 +142,8 @@ resource "aws_s3_bucket_policy" "terraform_state" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "DenyDeleteActions"
-        Effect = "Deny"
+        Sid       = "DenyDeleteActions"
+        Effect    = "Deny"
         Principal = "*"
         Action = [
           "s3:DeleteBucket",
@@ -175,9 +175,9 @@ resource "aws_s3_bucket_policy" "terraform_state" {
 # Reference: https://developer.hashicorp.com/terraform/language/state/locking
 # =============================================================================
 resource "aws_dynamodb_table" "terraform_locks" {
-  name           = "heimdall-tflock-production-${var.bucket_name_suffix}"
-  billing_mode   = "PAY_PER_REQUEST"
-  hash_key       = "LockID"
+  name                        = "heimdall-tflock-production-${var.bucket_name_suffix}"
+  billing_mode                = "PAY_PER_REQUEST"
+  hash_key                    = "LockID"
   deletion_protection_enabled = true
 
   attribute {
