@@ -42,6 +42,8 @@ module "eks" {
   environment = var.environment
   vpc_id      = data.aws_ssm_parameter.vpc_id.value
 
+  cluster_endpoint_public_access_cidrs = var.cluster_endpoint_public_access_cidrs
+
   # SSM stores StringLists as comma-separated values. We split them back to lists.
   private_subnets = split(",", data.aws_ssm_parameter.private_subnets.value)
 }

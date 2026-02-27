@@ -46,9 +46,9 @@ variable "instances" {
 }
 
 variable "engine_version" {
-  description = "PostgreSQL engine version (e.g., 15.4, 16.1). Check AWS RDS documentation for available versions."
+  description = "PostgreSQL engine version (e.g., 15.15, 16.11). Check AWS RDS documentation for available versions."
   type        = string
-  default     = "15.4"
+  default     = "15.15"
 }
 
 variable "backup_retention_period" {

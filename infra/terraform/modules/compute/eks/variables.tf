@@ -25,7 +25,7 @@ variable "private_subnets" {
 variable "cluster_version" {
   description = "Kubernetes minor version to use for the EKS cluster (e.g., 1.29, 1.30). Must be 1.28+ for modern EKS features (Access Entries, Pod Identity Agent)."
   type        = string
-  default     = "1.30"
+  default     = "1.31"
 
   validation {
     condition     = tonumber(split(".", var.cluster_version)[1]) >= 28
