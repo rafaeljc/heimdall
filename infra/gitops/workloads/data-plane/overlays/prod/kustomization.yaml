@@ -5,6 +5,7 @@ bases:
   - ../../base
 
 resources:
+  - certificate.yaml
   - hpa.yaml
 
 patches:
@@ -18,4 +19,7 @@ configMapGenerator:
       - HEIMDALL_APP_LOG_LEVEL=info
       - HEIMDALL_APP_LOG_FORMAT=json
       - HEIMDALL_REDIS_TLS_ENABLED=true
-      - HEIMDALL_SERVER_DATA_TLS_ENABLED=false # Internal TLS termination is deferred to edge/ingress or future Service Mesh
+      # Enforce TLS on the gRPC Data Plane
+      - HEIMDALL_SERVER_DATA_TLS_ENABLED=true
+      - HEIMDALL_SERVER_DATA_TLS_CERT_PATH=/etc/heimdall/certs/tls.crt
+      - HEIMDALL_SERVER_DATA_TLS_KEY_PATH=/etc/heimdall/certs/tls.key

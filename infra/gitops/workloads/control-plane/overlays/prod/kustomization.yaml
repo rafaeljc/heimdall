@@ -4,6 +4,9 @@ kind: Kustomization
 bases:
   - ../../base
 
+resources:
+  - certificate.yaml
+
 patches:
   - path: deployment-patch.yaml
 
@@ -17,4 +20,7 @@ configMapGenerator:
       - HEIMDALL_APP_LOG_FORMAT=json
       - HEIMDALL_DB_SSL_MODE=require
       - HEIMDALL_REDIS_TLS_ENABLED=true
-      - HEIMDALL_SERVER_CONTROL_TLS_ENABLED=false # TLS is usually terminated at the AWS ALB/Ingress level
+      # Enforce TLS on the Control Plane API
+      - HEIMDALL_SERVER_CONTROL_TLS_ENABLED=true
+      - HEIMDALL_SERVER_CONTROL_TLS_CERT_PATH=/etc/heimdall/certs/tls.crt
+      - HEIMDALL_SERVER_CONTROL_TLS_KEY_PATH=/etc/heimdall/certs/tls.key
