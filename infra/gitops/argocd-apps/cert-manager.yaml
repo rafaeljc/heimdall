@@ -1,0 +1,51 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  labels:
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/part-of: platform-system
+  annotations:
+    # Wave 1: Core infrastructure tools must be installed before any configuration
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: 'https://charts.jetstack.io'
+    targetRevision: v1.13.3
+    chart: cert-manager
+    helm:
+      releaseName: cert-manager
+      parameters:
+        # Mandatory: Install Custom Resource Definitions (CRDs) alongside the chart
+        - name: installCRDs
+          value: "true"
+        # High Availability: Run multiple replicas of the controller
+        - name: replicaCount
+          value: "2"
+        # Enable leader election for the controller to avoid split-brain scenarios
+        - name: extraArgs[0]
+          value: "--leader-election-namespace=kube-system"
+        # Ensure webhook reliability during cluster scaling
+        - name: webhook.replicaCount
+          value: "2"
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: cert-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+    # Robust retry strategy: CRD registration in K8s can take a few seconds
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m

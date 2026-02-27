@@ -1,26 +1,25 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: heimdall-syncer
+  name: cert-manager-config
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
   labels:
-    app.kubernetes.io/name: heimdall-syncer
-    app.kubernetes.io/component: syncer
-    app.kubernetes.io/part-of: heimdall
+    app.kubernetes.io/name: cert-manager-config
+    app.kubernetes.io/part-of: platform-system
   annotations:
-    # Wave 3: Deploys the components only after all foundational tools are fully ready
-    argocd.argoproj.io/sync-wave: "3"
+    # Wave 2: Applies configurations ONLY after the Wave 1 CRDs and controllers are fully ready
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   project: default
   source:
     repoURL: 'https://github.com/rafaeljc/heimdall.git'
     targetRevision: HEAD
-    path: infra/gitops/workloads/syncer/overlays/prod
+    path: infra/gitops/system/cert-manager
   destination:
     server: 'https://kubernetes.default.svc'
-    namespace: heimdall-prod
+    namespace: cert-manager
   syncPolicy:
     automated:
       prune: true
