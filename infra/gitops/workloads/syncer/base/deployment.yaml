@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: heimdall-syncer
+  labels:
+    app.kubernetes.io/name: heimdall-syncer
+    app.kubernetes.io/component: syncer
+    app.kubernetes.io/part-of: heimdall
+spec:
+  # Replicas are intentionally omitted here to allow the HorizontalPodAutoscaler (HPA) to manage them
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: heimdall-syncer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: heimdall-syncer
+        app.kubernetes.io/component: syncer
+    spec:
+      # Extended grace period allows the worker to complete in-flight database/Redis sync batches before terminating
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: syncer
+          image: heimdall-syncer:latest
+          imagePullPolicy: Always
+          ports:
+            # The syncer does not receive public traffic; only the observability port is exposed
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          
+          # Health checks are bound to the observability server to ensure they don't block the main sync loop
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+          
+          # Zero-trust security context: Principle of least privilege enforced
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 3000
+            capabilities:
+              drop:
+                - ALL

@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: heimdall-control-plane
+spec:
+  # Minimum baseline for High Availability
+  replicas: 2
+  template:
+    spec:
+      # Anti-affinity: Ensures pods are distributed across different physical nodes/AZs
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: heimdall-control-plane
+      containers:
+        - name: control-plane
+          # Strict hardware limits to prevent Noisy Neighbor issues and OOM kills
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          envFrom:
+            - configMapRef:
+                name: heimdall-control-plane-config
+          # TODO: Sensitive credentials (DB passwords) will be injected via External Secrets Operator

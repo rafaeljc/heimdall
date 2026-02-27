@@ -21,6 +21,13 @@ tasks:
       - chmod +x setup.sh
       - ./setup.sh
 
+  infra:gitops:bootstrap:
+    desc: "Initialize ArgoCD and deploy GitOps root application (one-time setup)"
+    dir: infra/gitops/bootstrap
+    cmds:
+      - chmod +x setup.sh
+      - ./setup.sh
+
   # --- DEVELOPMENT WORKFLOW (dev:*) ---
   dev:up:
     desc: Starts the local environment (builds images and starts containers)

@@ -1,0 +1,28 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: heimdall-control-plane
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  labels:
+    app.kubernetes.io/name: heimdall-control-plane
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of: heimdall
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/rafaeljc/heimdall.git'
+    targetRevision: HEAD
+    # Points to the environment-specific Kustomize overlay
+    path: infra/gitops/workloads/control-plane/overlays/prod
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: heimdall-prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground

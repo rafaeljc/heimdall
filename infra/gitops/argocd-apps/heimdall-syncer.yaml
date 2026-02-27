@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: heimdall-syncer
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  labels:
+    app.kubernetes.io/name: heimdall-syncer
+    app.kubernetes.io/component: syncer
+    app.kubernetes.io/part-of: heimdall
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/rafaeljc/heimdall.git'
+    targetRevision: HEAD
+    path: infra/gitops/workloads/syncer/overlays/prod
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: heimdall-prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground

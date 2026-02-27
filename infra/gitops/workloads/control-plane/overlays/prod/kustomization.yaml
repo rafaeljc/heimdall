@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+bases:
+  - ../../base
+
+patches:
+  - path: deployment-patch.yaml
+
+# Kustomize appends a hash to the ConfigMap name. 
+# Changing these values will automatically trigger a rolling restart of the pods.
+configMapGenerator:
+  - name: heimdall-control-plane-config
+    literals:
+      - HEIMDALL_APP_ENV=production
+      - HEIMDALL_APP_LOG_LEVEL=info
+      - HEIMDALL_APP_LOG_FORMAT=json
+      - HEIMDALL_DB_SSL_MODE=require
+      - HEIMDALL_REDIS_TLS_ENABLED=true
+      - HEIMDALL_SERVER_CONTROL_TLS_ENABLED=false # TLS is usually terminated at the AWS ALB/Ingress level

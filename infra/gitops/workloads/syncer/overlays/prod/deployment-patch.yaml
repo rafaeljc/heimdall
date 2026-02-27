@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: heimdall-syncer
+spec:
+  template:
+    spec:
+      # Anti-affinity: Ensures worker pods are distributed across different AWS physical nodes/AZs
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: heimdall-syncer
+      containers:
+        - name: syncer
+          # Resources tuned for highly concurrent I/O operations (Postgres -> Redis)
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          envFrom:
+            - configMapRef:
+                name: heimdall-syncer-config

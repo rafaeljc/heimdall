@@ -1,0 +1,31 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: heimdall-root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  labels:
+    app.kubernetes.io/name: heimdall-root
+    app.kubernetes.io/part-of: heimdall-gitops
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/rafaeljc/heimdall.git'
+    targetRevision: HEAD
+    # The Root App strictly monitors the ArgoCD apps directory
+    path: infra/gitops/argocd-apps
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    # Resilient syncs against network blips
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

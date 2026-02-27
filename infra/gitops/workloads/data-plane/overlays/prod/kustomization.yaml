@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+bases:
+  - ../../base
+
+resources:
+  - hpa.yaml
+
+patches:
+  - path: deployment-patch.yaml
+
+# Kustomize automatically hashes this ConfigMap. Modifying any value will trigger a seamless rolling update of the pods.
+configMapGenerator:
+  - name: heimdall-data-plane-config
+    literals:
+      - HEIMDALL_APP_ENV=production
+      - HEIMDALL_APP_LOG_LEVEL=info
+      - HEIMDALL_APP_LOG_FORMAT=json
+      - HEIMDALL_REDIS_TLS_ENABLED=true
+      - HEIMDALL_SERVER_DATA_TLS_ENABLED=false # Internal TLS termination is deferred to edge/ingress or future Service Mesh

@@ -1,0 +1,42 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: heimdall-syncer
+  labels:
+    app.kubernetes.io/name: heimdall-syncer
+    app.kubernetes.io/component: syncer
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: heimdall-syncer
+  # Maintain at least 2 active workers for high availability and constant background processing
+  minReplicas: 2
+  # Allow elastic scaling to handle massive bursts of feature flag state changes
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 75
+  
+  # Advanced Scaling Behavior tailored for asynchronous background workers
+  behavior:
+    # Scale down conservatively to avoid killing workers that are actively processing large sync batches
+    scaleDown:
+      stabilizationWindowSeconds: 300 # Wait 5 minutes before evaluating a scale-down
+      policies:
+        - type: Pods
+          value: 1 # Terminate at most 1 worker per minute
+          periodSeconds: 60
+    
+    # Scale up aggressively when CPU spikes due to heavy database polling or hydration tasks
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 50 # Allow increasing the fleet size by 50% every 15 seconds
+          periodSeconds: 15
+      selectPolicy: Max

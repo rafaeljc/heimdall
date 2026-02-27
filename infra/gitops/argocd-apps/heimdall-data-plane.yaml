@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: heimdall-data-plane
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  labels:
+    app.kubernetes.io/name: heimdall-data-plane
+    app.kubernetes.io/component: data-plane
+    app.kubernetes.io/part-of: heimdall
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/rafaeljc/heimdall.git'
+    targetRevision: HEAD
+    path: infra/gitops/workloads/data-plane/overlays/prod
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: heimdall-prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
