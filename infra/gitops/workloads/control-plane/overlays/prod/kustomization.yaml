@@ -6,6 +6,8 @@ bases:
 
 resources:
   - certificate.yaml
+  - cluster-secret-store.yaml
+  - external-secret.yaml
 
 patches:
   - path: deployment-patch.yaml

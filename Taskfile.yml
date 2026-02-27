@@ -28,6 +28,33 @@ tasks:
       - chmod +x setup.sh
       - ./setup.sh
 
+  infra:secrets:create:
+    desc: "Create API key secret in AWS Secrets Manager"
+    vars:
+      REGION: "{{.REGION}}"
+      CONTROL_HASH: "{{.CONTROL_HASH}}"
+      DATA_HASH: "{{.DATA_HASH}}"
+    cmds:
+      - |
+        aws secretsmanager create-secret \
+          --name "heimdall/prod/api-keys" \
+          --description "API Key Hashes for Heimdall Control and Data Planes" \
+          --secret-string "{\"control_plane_hash\":\"{{.CONTROL_HASH}}\",\"data_plane_hash\":\"{{.DATA_HASH}}\"}" \
+          --region {{.REGION}}
+
+  infra:secrets:update:
+    desc: "Update API key secret in AWS Secrets Manager (rotate credentials)"
+    vars:
+      REGION: "{{.REGION}}"
+      CONTROL_HASH: "{{.CONTROL_HASH}}"
+      DATA_HASH: "{{.DATA_HASH}}"
+    cmds:
+      - |
+        aws secretsmanager put-secret-value \
+          --secret-id "heimdall/prod/api-keys" \
+          --secret-string "{\"control_plane_hash\":\"{{.CONTROL_HASH}}\",\"data_plane_hash\":\"{{.DATA_HASH}}\"}" \
+          --region {{.REGION}}
+
   # --- DEVELOPMENT WORKFLOW (dev:*) ---
   dev:up:
     desc: Starts the local environment (builds images and starts containers)

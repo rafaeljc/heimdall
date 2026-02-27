@@ -26,3 +26,5 @@ spec:
           envFrom:
             - configMapRef:
                 name: heimdall-syncer-config
+            - secretRef:
+                name: heimdall-secrets-native
