@@ -1,0 +1,31 @@
+# Control Plane Public Service
+# Exposes the Heimdall Control Plane REST API externally via AWS Network Load Balancer.
+# This service creates a public-facing endpoint for clients to interact with the feature flag API.
+#
+# Naming Convention: The "-public" suffix distinguishes this from the internal ClusterIP service.
+# Load Balancer Type: AWS NLB with IP target type for efficient L4 routing.
+# Port Strategy: Exposes only port 443 (HTTPS), keeping metrics endpoints (9090) internal.
+# TLS Handling: The internal "http" port carries TLS-encrypted traffic from the NLB.
+# Dependencies: Requires AWS Load Balancer Controller to create the underlying AWS resources.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: heimdall-control-plane-public
+  annotations:
+    # AWS Load Balancer Controller directives for NLB creation
+    service.beta.kubernetes.io/aws-load-balancer-type: "external"
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+spec:
+  type: LoadBalancer
+  # Routes traffic to control-plane pods
+  selector:
+    app.kubernetes.io/name: heimdall-control-plane
+  # Port Configuration: Explicitly exposes only the HTTPS port, restricting metrics access
+  ports:
+    - name: https
+      port: 443
+      # Internal port name (carries TLS-encrypted traffic from NLB)
+      targetPort: http
+      protocol: TCP

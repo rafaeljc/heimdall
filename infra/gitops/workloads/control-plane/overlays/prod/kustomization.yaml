@@ -9,6 +9,7 @@ resources:
   - cluster-secret-store.yaml
   - external-secret.yaml
   - migration-job.yaml
+  - service-public.yaml
 
 patches:
   - path: deployment-patch.yaml

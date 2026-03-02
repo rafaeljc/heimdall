@@ -8,6 +8,7 @@ resources:
   - certificate.yaml
   - hpa.yaml
   - external-secret.yaml
+  - service-public.yaml
 
 patches:
   - path: deployment-patch.yaml
