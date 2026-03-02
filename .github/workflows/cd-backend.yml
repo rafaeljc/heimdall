@@ -12,6 +12,14 @@ on:
       - 'proto/**'
       - 'Dockerfile'
       - '.github/workflows/cd-backend.yml'
+  
+  # Manual trigger for emergency hotfixes or redeploys of existing code
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to deploy (commit SHA, branch, or tag)'
+        required: false
+        default: 'main'
 
 # Ensure sequential deployments to prevent state conflicts in the GitOps repository.
 # If a new push happens while a deploy is running, it will queue, not cancel.

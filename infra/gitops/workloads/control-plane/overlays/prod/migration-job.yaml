@@ -1,0 +1,69 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: heimdall-db-migration
+  annotations:
+    # GitOps Execution Order: Runs strictly BEFORE the application Pods are updated.
+    argocd.argoproj.io/hook: PreSync
+    # Removes the job upon success and forcefully clears any 
+    # stuck jobs from previous failed syncs to prevent naming collisions.
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded,BeforeHookCreation
+spec:
+  # Hard Timeout: Prevents the Job from hanging infinitely (e.g., if the DB is unreachable),
+  # which would block ArgoCD from performing subsequent deployments.
+  # 600s allows time for large schema refactors while maintaining responsiveness.
+  activeDeadlineSeconds: 600 
+  # Fail-Fast Mechanism: Aborts the Job after 2 failed attempts (e.g., SQL syntax errors)
+  # instead of entering an infinite crash loop.
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      initContainers:
+        - name: validate-secrets
+          image: bitnami/kubectl:latest
+          # Pre-flight check: Ensures database secrets are available before attempting migration.
+          # Fails fast if External Secrets Operator hasn't synced secrets from AWS Secrets Manager.
+          command:
+            - "sh"
+            - "-c"
+            - "kubectl get secret heimdall-secrets-native > /dev/null || exit 1"
+      containers:
+        - name: db-migration
+          image: migrate/migrate:v4.16.2
+          # Secure Secret Injection: Extracts the database credentials dynamically
+          # fetched by the External Secrets Operator from AWS Secrets Manager.
+          envFrom:
+            - secretRef:
+                name: heimdall-secrets-native
+          # Execution Command: Runs the golang-migrate CLI against the Aurora Postgres DB.
+          # Post-execution verification ensures schema version matches expected state.
+          command: ["/bin/sh", "-c"]
+          args: 
+            - |
+              set -eo pipefail
+              echo "Starting database migrations..."
+              migrate -path=/migrations -database=${HEIMDALL_DB_URL} up
+              MIGRATION_VERSION=$(migrate -path=/migrations -database=${HEIMDALL_DB_URL} version)
+              echo "Migration completed. Current schema version: ${MIGRATION_VERSION}"
+              if [ -z "${MIGRATION_VERSION}" ]; then
+                echo "ERROR: Schema version verification failed"
+                exit 1
+              fi
+              echo "Database migration successful"
+          volumeMounts:
+            - name: migrations-volume
+              mountPath: /migrations
+          # Defines strict boundaries to prevent the migration 
+          # container from starving production Pods of CPU or Memory.
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "64Mi"
+            limits:
+              cpu: "250m"
+              memory: "128Mi"
+      volumes:
+        - name: migrations-volume
+          configMap:
+            name: heimdall-db-migrations
