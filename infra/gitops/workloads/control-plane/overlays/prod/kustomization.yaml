@@ -1,15 +1,14 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-bases:
-  - ../../base
-
 resources:
+  - ../../base
   - certificate.yaml
   - cluster-secret-store.yaml
   - external-secret.yaml
   - migration-job.yaml
   - service-public.yaml
+  - ../../../../../../migrations
 
 patches:
   - path: deployment-patch.yaml
@@ -28,12 +27,3 @@ configMapGenerator:
       - HEIMDALL_SERVER_CONTROL_TLS_ENABLED=true
       - HEIMDALL_SERVER_CONTROL_TLS_CERT_PATH=/etc/heimdall/certs/tls.crt
       - HEIMDALL_SERVER_CONTROL_TLS_KEY_PATH=/etc/heimdall/certs/tls.key
-  # Deterministic Migration Mount: Transforms the SQL files into a ConfigMap.
-  # Security Note: We use an explicit allowlist rather than directory inclusion
-  # to prevent accidental execution of temporary or backup files.
-  - name: heimdall-db-migrations
-    files:
-      - ../../../../../../migrations/001_init_schema.sql
-      - ../../../../../../migrations/002_add_rules_and_version.up.sql
-      - ../../../../../../migrations/003_add_soft_delete_and_unique_indexes.up.sql
-      # FUTURE MIGRATIONS: Must be explicitly appended to this list by developers.

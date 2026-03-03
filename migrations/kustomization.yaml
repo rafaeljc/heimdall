@@ -1,0 +1,30 @@
+# Database Migrations Kustomization
+# ===================================
+# This kustomization generates a ConfigMap containing all database migration SQL files.
+# 
+# ARCHITECTURE:
+# - Root-level kustomization ensures migration files stay within Kustomize's directory boundary
+# - Allows safe file composition from control-plane/overlays/prod (avoids file path constraints)
+# - Single source of truth for database schema evolution
+#
+# COMPOSITION:
+# - Included by control-plane overlay as: resources: [../../../../../../migrations]
+# - ConfigMap name: heimdall-db-migrations (generated with content hash for auto-rollout)
+# - Mounted into control-plane pod via migration-job.yaml and application initialization
+#
+# DEVELOPER WORKFLOW:
+# 1. Create new migration file in this directory: NNN_description.up.sql
+# 2. Add to the files list below (maintain sequential numbering)
+# 3. Git commit - deployment will auto-detect via ConfigMap hash change
+# 4. No manual sync required across overlays (composition handles it)
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+configMapGenerator:
+  - name: heimdall-db-migrations
+    files:
+      - 001_init_schema.sql
+      - 002_add_rules_and_version.up.sql
+      - 003_add_soft_delete_and_unique_indexes.up.sql
+      # FUTURE MIGRATIONS: Must be explicitly appended to this list by developers.
