@@ -1,11 +1,6 @@
 name: Node.js SDK CI
 
 on:
-  push:
-    branches: [ "main" ]
-    paths:
-      - 'sdks/node/**'
-      - '.github/workflows/ci-node-sdk.yml'
   pull_request:
     branches: [ "main" ]
     paths:
