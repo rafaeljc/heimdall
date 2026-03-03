@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: heimdall-data-plane
+spec:
+  template:
+    spec:
+      # Anti-affinity: Ensures Pods are distributed across different physical AWS nodes/AZs to survive hardware failures
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: heimdall-data-plane
+      containers:
+        - name: data-plane
+          volumeMounts:
+            - name: tls-certs
+              mountPath: /etc/heimdall/certs
+              readOnly: true
+          # High-performance resource allocation to handle gRPC multiplexing
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m" # 1 Full Core maximum during traffic spikes
+              memory: "512Mi" # Prevents Out-Of-Memory (OOM) kills
+          envFrom:
+            - configMapRef:
+                name: heimdall-data-plane-config
+            - secretRef:
+                name: heimdall-secrets-native
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: heimdall-data-plane-tls-secret
+            defaultMode: 0400

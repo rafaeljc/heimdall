@@ -1,0 +1,12 @@
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: system-internal-issuer
+  labels:
+    app.kubernetes.io/name: cluster-issuer
+    app.kubernetes.io/part-of: platform-system
+spec:
+  # A Self-Signed issuer is the industry standard for internal cluster mTLS.
+  # It securely encrypts pod-to-pod communication without relying on external CAs (like Let's Encrypt),
+  # ensuring that the internal network remains secure even in air-gapped scenarios or internet outages.
+  selfSigned: {}

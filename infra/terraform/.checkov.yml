@@ -1,0 +1,10 @@
+skip-check:
+  - CKV2_AWS_34  # Ignore: "AWS SSM Parameter should be Encrypted" -> We only store non-sensitive routing IDs here.
+  - CKV2_AWS_57  # Ignore: "Ensure Secrets Manager secrets should have automatic rotation enabled" -> Overkill for portfolio.
+  - CKV_AWS_149  # Ignore: "Ensure that Secrets Manager secret is encrypted using KMS CMK" -> Default AWS managed key is fine.
+  - CKV_AWS_191  # Ignore: "Ensure ElastiCache replication group is encrypted by KMS using CMK" -> Default encryption is fine.
+  - CKV2_AWS_64  # Ignore: "Ensure KMS key Policy is defined" -> Relies on default generated policy.
+  - CKV2_AWS_5   # Ignore: "Ensure that Security Groups are attached" -> False positive with external modules.
+  - CKV_TF_1     # Ignore: "Ensure Terraform module sources use a commit hash" -> We use semantic version tags (~> 5.0).
+  - CKV_TF_2     # Ignore: "Ensure Terraform module sources use a tag with a version number" -> Checkov fails to parse local external modules.
+  - CKV_AWS_300  # Ignore: "Ensure S3 lifecycle configuration sets period for aborting failed uploads" -> Portfolio state doesn't warrant this cleanup.

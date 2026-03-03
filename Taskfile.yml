@@ -4,12 +4,56 @@ version: '3'
 vars:
   BIN_DIR: bin
   PROTO_DIR: proto
+  VERSION:
+    sh: git rev-parse --short HEAD
 
 tasks:
   default:
     desc: Lists available tasks
     cmds:
       - task --list
+
+  # --- INFRASTRUCTURE (infra:*) ---
+  infra:bootstrap:
+    desc: "Initialize Heimdall bootstrap layer (one-time setup)"
+    dir: infra/terraform/bootstrap
+    cmds:
+      - chmod +x setup.sh
+      - ./setup.sh
+
+  infra:gitops:bootstrap:
+    desc: "Initialize ArgoCD and deploy GitOps root application (one-time setup)"
+    dir: infra/gitops/bootstrap
+    cmds:
+      - chmod +x setup.sh
+      - ./setup.sh
+
+  infra:secrets:create:
+    desc: "Create API key secret in AWS Secrets Manager"
+    vars:
+      REGION: "{{.REGION}}"
+      CONTROL_HASH: "{{.CONTROL_HASH}}"
+      DATA_HASH: "{{.DATA_HASH}}"
+    cmds:
+      - |
+        aws secretsmanager create-secret \
+          --name "heimdall/prod/api-keys" \
+          --description "API Key Hashes for Heimdall Control and Data Planes" \
+          --secret-string "{\"control_plane_hash\":\"{{.CONTROL_HASH}}\",\"data_plane_hash\":\"{{.DATA_HASH}}\"}" \
+          --region {{.REGION}}
+
+  infra:secrets:update:
+    desc: "Update API key secret in AWS Secrets Manager (rotate credentials)"
+    vars:
+      REGION: "{{.REGION}}"
+      CONTROL_HASH: "{{.CONTROL_HASH}}"
+      DATA_HASH: "{{.DATA_HASH}}"
+    cmds:
+      - |
+        aws secretsmanager put-secret-value \
+          --secret-id "heimdall/prod/api-keys" \
+          --secret-string "{\"control_plane_hash\":\"{{.CONTROL_HASH}}\",\"data_plane_hash\":\"{{.DATA_HASH}}\"}" \
+          --region {{.REGION}}
 
   # --- DEVELOPMENT WORKFLOW (dev:*) ---
   dev:up:
@@ -18,12 +62,12 @@ tasks:
       # build ensures that if you change main.go, the image is recreated
       - docker compose up -d --build
       - echo "Heimdall environment is running!"
-      - 'echo "Control API:         http://localhost:8080"'
-      - 'echo "Data Plane gRPC:     http://localhost:50051"'
-      - 'echo "Swagger UI:          http://localhost:8081"'
-      - 'echo "Observability (control): http://localhost:9090"'
-      - 'echo "Observability (data):    http://localhost:9091"'
-      - 'echo "Observability (syncer):  http://localhost:9092"'
+      - 'echo "Control API:         localhost:8080"'
+      - 'echo "Data Plane gRPC:     localhost:50051"'
+      - 'echo "Swagger UI:          localhost:8081"'
+      - 'echo "Observability (control): localhost:9090"'
+      - 'echo "Observability (data):    localhost:9091"'
+      - 'echo "Observability (syncer):  localhost:9092"'
 
   dev:down:
     desc: Stops the local environment (stops containers and removes networks)
@@ -70,11 +114,38 @@ tasks:
       - ./**/*.go
 
   build:docker:
-    desc: Builds Production Docker images for all services
+    internal: true
+    deps: [tidy:deps, check:lint, test:unit, test:integration, build:local]
     cmds:
-      - docker build -f Dockerfile.control-plane -t heimdall-control:latest .
-      - docker build -f Dockerfile.data-plane -t heimdall-data:latest .
-      - docker build -f Dockerfile.syncer -t heimdall-syncer:latest .
+      - docker build -t heimdall-{{.SERVICE}}:{{.VERSION}} --build-arg SERVICE_NAME={{.SERVICE}} --build-arg VERSION={{.VERSION}} .
+  
+  build:docker:control:
+    desc: Builds Docker image for Control Plane
+    cmds:
+      - task: build:docker
+        vars:
+          SERVICE: control
+
+  build:docker:data:
+    desc: Builds Docker image for Data Plane
+    cmds:
+      - task: build:docker
+        vars:
+          SERVICE: data
+
+  build:docker:syncer:
+    desc: Builds Docker image for Syncer
+    cmds:
+      - task: build:docker
+        vars:
+          SERVICE: syncer
+
+  build:docker:all:
+    desc: Builds Docker images for all services
+    cmds:
+      - task build:docker:control
+      - task build:docker:data
+      - task build:docker:syncer
 
   # --- CODE GENERATION (generate:*) ---
   generate:proto:

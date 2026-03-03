@@ -1,0 +1,187 @@
+name: Backend CD
+
+on:
+  push:
+    branches:
+      - main
+    # Trigger the factory only when application source code or build instructions change.
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'proto/**'
+      - 'Dockerfile'
+      - '.github/workflows/cd-backend.yml'
+  
+  # Manual trigger for emergency hotfixes or redeploys of existing code
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to deploy (commit SHA, branch, or tag)'
+        required: false
+        default: 'main'
+
+# Ensure sequential deployments to prevent state conflicts in the GitOps repository.
+# If a new push happens while a deploy is running, it will queue, not cancel.
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  KUSTOMIZE_VERSION: "5.3.0"
+
+jobs:
+  build-and-push:
+    name: Build and Push Images
+    runs-on: ubuntu-latest
+    # Principle of Least Privilege: Only permissions required to read code and publish packages
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      # If one component fails to build, cancel the others immediately to save compute time
+      fail-fast: true
+      matrix:
+        component:
+          - control-plane
+          - data-plane
+          - syncer
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker Metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.component }}
+          tags: |
+            type=sha,format=short
+            type=raw,value=latest
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and Push Container Image
+        id: build-push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          build-args: |
+            COMPONENT=${{ matrix.component }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Leverage GitHub Actions cache for Go layer optimization
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+
+      - name: Validate Image Push
+        # Verify that the image was successfully pushed to the registry
+        run: |
+          set -eo pipefail
+          
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          IMAGE_TAG="sha-${SHORT_SHA}"
+          IMAGE="${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.component }}:${IMAGE_TAG}"
+          
+          echo "Validating pushed image: ${IMAGE}"
+          
+          # Use docker inspect to verify image exists in registry
+          docker run --rm mplatform/mquery "${IMAGE}" > /dev/null 2>&1 || {
+            echo "ERROR: Image not found in registry: ${IMAGE}"
+            exit 1
+          }
+          
+          echo "Image validation passed: ${IMAGE}"
+
+  generate-gitops-pr:
+    name: Generate GitOps Release PR
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    # Principle of Least Privilege: Only permissions required to create branches and PRs
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout Infrastructure Code
+        uses: actions/checkout@v4
+
+      - name: Setup Kustomize
+        uses: imranismail/setup-kustomize@v2
+        with:
+          kustomize-version: ${{ env.KUSTOMIZE_VERSION }}
+
+      - name: Update Kubernetes Manifests
+        env:
+          BASE_REPO: ${{ env.REGISTRY }}/${{ github.repository }}
+        run: |
+          # Abort script on any error to prevent malformed commits
+          set -eo pipefail
+
+          # Extract the 7-character short SHA to match Docker metadata output
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          IMAGE_TAG="sha-${SHORT_SHA}"
+          
+          echo "Updating production manifests to use image tag: ${IMAGE_TAG}"
+
+          # DRY iteration over all components
+          COMPONENTS=("control-plane" "data-plane" "syncer")
+
+          for COMPONENT in "${COMPONENTS[@]}"; do
+            DIR="infra/gitops/workloads/${COMPONENT}/overlays/prod"
+            
+            # Validate directory exists before proceeding
+            if [ ! -d "${DIR}" ]; then
+              echo "ERROR: Directory not found: ${DIR}"
+              exit 1
+            fi
+            
+            echo "Processing ${COMPONENT} in directory: ${DIR}..."
+            
+            cd "${DIR}"
+            kustomize edit set image "heimdall-${COMPONENT}=${BASE_REPO}/${COMPONENT}:${IMAGE_TAG}"
+            # Return to the root directory silently
+            cd - > /dev/null
+            
+            echo "Successfully updated kustomization for ${COMPONENT}"
+          done
+          
+          echo "All manifests updated successfully"
+
+      - name: Create GitOps Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore(release): update production images to ${{ github.sha }}"
+          branch: "release/prod-${{ github.sha }}"
+          title: "chore(release): deploy production images (${{ github.sha }})"
+          body: |
+            ## Production Deployment Request
+            
+            This automated pull request updates the GitOps manifests to deploy the latest software release.
+            
+            ### Release Details
+            - **Commit SHA:** `${{ github.sha }}`
+            - **Environment:** `Production`
+            
+            ### Updated Components
+            - `control-plane`
+            - `data-plane`
+            - `syncer`
+            
+            ---
+            > **Security and Compliance Note:** This Pull Request modifies ONLY the infrastructure configuration (`kustomization.yaml` tags). Since source code is untouched, CI tests are bypassed. Please review and merge to trigger the ArgoCD synchronization.
+          labels: "automated-release, gitops, production"

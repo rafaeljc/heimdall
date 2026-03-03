@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: heimdall-syncer
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  labels:
+    app.kubernetes.io/name: heimdall-syncer
+    app.kubernetes.io/component: syncer
+    app.kubernetes.io/part-of: heimdall
+  annotations:
+    # Wave 3: Deploys the components only after all foundational tools are fully ready
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/rafaeljc/heimdall.git'
+    targetRevision: HEAD
+    path: infra/gitops/workloads/syncer/overlays/prod
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: heimdall-prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

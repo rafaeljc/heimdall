@@ -1,0 +1,25 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: heimdall-control-plane-tls
+  labels:
+    app.kubernetes.io/name: heimdall-control-plane
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of: heimdall
+spec:
+  # The Kubernetes Secret where cert-manager will securely store the generated tls.crt and tls.key
+  secretName: heimdall-control-plane-tls-secret
+  duration: 2160h # 90 days validity
+  renewBefore: 360h # Auto-renew 15 days before expiration
+  isCA: false
+  privateKey:
+    # ECDSA is highly recommended over RSA for modern Go/gRPC services due to significantly lower CPU overhead during TLS handshakes
+    algorithm: ECDSA
+    size: 256
+  dnsNames:
+    # Internal Service DNS names allowed by the certificate
+    - heimdall-control-plane.heimdall-prod.svc
+    - heimdall-control-plane.heimdall-prod.svc.cluster.local
+  issuerRef:
+    name: system-internal-issuer
+    kind: ClusterIssuer

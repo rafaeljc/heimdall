@@ -1,0 +1,51 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: heimdall-data-plane
+  labels:
+    app.kubernetes.io/name: heimdall-data-plane
+    app.kubernetes.io/component: data-plane
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: heimdall-data-plane
+  # Keep at least 3 instances active across different AZs for baseline reliability
+  minReplicas: 3
+  # Allow massive scaling up to 50 instances during severe traffic spikes
+  maxReplicas: 50
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  
+  # Advanced Scaling Behavior tailored for gRPC (HTTP/2 long-lived connections)
+  behavior:
+    # Scale down lazily to prevent connection thrashing (Flapping)
+    scaleDown:
+      stabilizationWindowSeconds: 300 # Wait 5 minutes before making scale-down decisions
+      policies:
+        - type: Percent
+          value: 10 # Terminate a maximum of 10% of pods per minute
+          periodSeconds: 60
+    
+    # Scale up aggressively (Panic mode) to handle sudden spikes
+    scaleUp:
+      stabilizationWindowSeconds: 0 # React instantly
+      policies:
+        - type: Percent
+          value: 100 # Allow doubling the fleet every 15 seconds
+          periodSeconds: 15
+        - type: Pods
+          value: 4 # Or add at least 4 pods at a time (whichever is greater)
+          periodSeconds: 15
+      selectPolicy: Max
