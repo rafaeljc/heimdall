@@ -109,7 +109,7 @@ jobs:
           set -eo pipefail
           pip install checkov --quiet
           echo "Running Checkov security scan..."
-          checkov -d . --framework terraform --compact || exit 1
+          checkov -d . --framework terraform --compact --config-file .checkov.yml || exit 1
 
   gitops-validate:
     name: Validate GitOps Manifests

@@ -53,6 +53,11 @@ provider "aws" {
 # - Lifecycle protection: Prevents accidental deletion
 # =============================================================================
 resource "aws_s3_bucket" "terraform_state" {
+  # checkov:skip=CKV_AWS_144: "Cross-region replication is overkill for portfolio state"
+  # checkov:skip=CKV_AWS_145: "Default AES256 encryption is acceptable for this scope"
+  # checkov:skip=CKV2_AWS_62: "Event notifications are not required for state files"
+  # checkov:skip=CKV2_AWS_61: "Lifecycle configuration is not needed for state files"
+
   bucket = "heimdall-tfstate-production-${var.bucket_name_suffix}"
 
   # Prevents accidental deletion of the state bucket
@@ -175,6 +180,10 @@ resource "aws_s3_bucket_policy" "terraform_state" {
 # Reference: https://developer.hashicorp.com/terraform/language/state/locking
 # =============================================================================
 resource "aws_dynamodb_table" "terraform_locks" {
+  # checkov:skip=CKV_AWS_28: "DynamoDB PITR is unnecessary for a portfolio state lock table"
+  # checkov:skip=CKV_AWS_119: "Default AWS managed KMS encryption is sufficient for state locks"
+  # checkov:skip=CKV2_AWS_16: "Auto-scaling is unnecessary for a single-developer lock table"
+
   name                        = "heimdall-tflock-production-${var.bucket_name_suffix}"
   billing_mode                = "PAY_PER_REQUEST"
   hash_key                    = "LockID"
