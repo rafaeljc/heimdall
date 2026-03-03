@@ -23,7 +23,7 @@ jobs:
         # Installs latest Terraform compatible with Ubuntu runner
 
       - name: Cache Terraform
-        uses: actions/cache@v4.0.2
+        uses: actions/cache@v4
         with:
           path: |
             ~/.terraform.d/plugins
@@ -127,7 +127,7 @@ jobs:
         # Installs pinned Kustomize version (5.3.0) for reproducible builds
 
       - name: Cache Kustomize
-        uses: actions/cache@v4.0.2
+        uses: actions/cache@v4
         with:
           path: ~/.cache/kustomize
           key: ${{ runner.os }}-kustomize-${{ hashFiles('infra/gitops/**/kustomization.yaml') }}
