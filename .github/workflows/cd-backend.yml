@@ -32,8 +32,23 @@ env:
   KUSTOMIZE_VERSION: "5.3.0"
 
 jobs:
+  setup:
+    name: Setup Workflow
+    runs-on: ubuntu-latest
+    outputs:
+      short_sha: ${{ steps.version.outputs.short_sha }}
+    steps:
+      - name: Extract Version from Git SHA
+        id: version
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = context.sha.substring(0, 7);
+            core.setOutput('short_sha', sha);
+
   build-and-push:
     name: Build and Push Images
+    needs: setup
     runs-on: ubuntu-latest
     # Principle of Least Privilege: Only permissions required to read code and publish packages
     permissions:
@@ -45,8 +60,8 @@ jobs:
       fail-fast: true
       matrix:
         component:
-          - control-plane
-          - data-plane
+          - control
+          - data
           - syncer
 
     steps:
@@ -79,7 +94,8 @@ jobs:
           context: .
           file: Dockerfile
           build-args: |
-            COMPONENT=${{ matrix.component }}
+            SERVICE_NAME=${{ matrix.component }}
+            VERSION=sha-${{ needs.setup.outputs.short_sha }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -92,8 +108,7 @@ jobs:
         run: |
           set -eo pipefail
           
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          IMAGE_TAG="sha-${SHORT_SHA}"
+          IMAGE_TAG="sha-${{ needs.setup.outputs.short_sha }}"
           IMAGE="${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.component }}:${IMAGE_TAG}"
           
           echo "Validating pushed image: ${IMAGE}"
@@ -108,7 +123,9 @@ jobs:
 
   generate-gitops-pr:
     name: Generate GitOps Release PR
-    needs: build-and-push
+    needs: [setup, build-and-push]
+    # # Disabled: Awaiting GitOps infrastructure setup
+    if: false 
     runs-on: ubuntu-latest
     # Principle of Least Privilege: Only permissions required to create branches and PRs
     permissions:
@@ -131,9 +148,8 @@ jobs:
           # Abort script on any error to prevent malformed commits
           set -eo pipefail
 
-          # Extract the 7-character short SHA to match Docker metadata output
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          IMAGE_TAG="sha-${SHORT_SHA}"
+          # Use the short SHA from the setup job
+          IMAGE_TAG="sha-${{ needs.setup.outputs.short_sha }}"
           
           echo "Updating production manifests to use image tag: ${IMAGE_TAG}"
 
