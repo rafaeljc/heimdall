@@ -26,6 +26,18 @@ Heimdall's design centers on the **CQRS pattern**: separating the slow, consiste
 
 * **Client SDKs:** Lightweight, resilient libraries embedded in your applications. They cache flag evaluations locally with a configurable TTL, delivering microsecond-latency responses for cached entries and automatically refreshing from the Data Plane after TTL expiration. SDKs handle gRPC connection lifecycle, graceful degradation on network failures, and abstract away the complexity of the Data Plane protocol.
 
+## Performance & Benchmarks
+
+Heimdall is load-tested to validate reliability and performance under high traffic. In this test configuration, the system showed strong horizontal scaling behavior.
+
+In this benchmark configuration, **a single Kubernetes Pod limited to 1 CPU (`1000m`) sustained over 10,000 Requests Per Second (RPS)** while maintaining **P99.9 latency under 20ms**.
+
+![Heimdall Load Test - 10k RPS](https://github.com/user-attachments/assets/381b89e3-285d-4b60-9345-b8567724eb37)
+
+**Single-core configuration note:** By pinning the Go runtime (`GOMAXPROCS=1`) and limiting the Pod to a single core, Heimdall reduces multi-core lock contention and CPU cache bouncing (L1 invalidations). In this configuration, that contributed to high throughput with low infrastructure overhead.
+
+**[View the full interactive Grafana Snapshot of the Load Test](https://snapshots.raintank.io/dashboard/snapshot/By0pG1AWnXhbbuHjq5Y1t6mpvrMY03o7)**
+
 ## Quick Start (Local Development)
 
 Heimdall is built for a frictionless developer experience. 
@@ -37,25 +49,63 @@ Heimdall is built for a frictionless developer experience.
 - [buf](https://buf.build/docs/installation)
 - [golangci-lint](https://github.com/golangci/golangci-lint)
 
+**Step-by-step:**
+
+1. Clone the repository and enter the project directory.
+
 ```bash
-# 1. Set up environment variables
+git clone https://github.com/rafaeljc/heimdall.git && cd heimdall
+```
 
-# Create .env from template
+2. Set up environment variables.
+
+```bash
 cp .env.example .env
+```
 
-# Generate API key hashes
-# Option A: Generate a new API key and hash
-# Outputs both the key and SHA-256 hash; update the hashes in .env
-task sec:genkey  
-# Option B: Hash an existing API key
-# Prompts for an API key and outputs its SHA-256 hash; update the hashes in .env
-task sec:hash  
+Review the configuration documentation before editing `.env` values: [docs/configuration.md](docs/configuration.md).
 
-# 2. Start local services
+3. Generate API key hashes (choose one option).
+
+Option A: Generate a new API key and hash.
+
+```bash
+task sec:genkey
+```
+
+Option B: Hash an existing API key.
+
+```bash
+task sec:hash
+```
+
+4. Start local services.
+
+```bash
 task dev:up
+```
 
-# 3. Stop local services
+5. After startup, the main local endpoints are:
+
+	- **Control Plane (REST):** http://localhost:8080
+	- **API Documentation (Swagger UI):** http://localhost:8081
+	- **Data Plane (gRPC):** localhost:50051
+
+	Health check endpoints:
+	- **Control Plane:** http://localhost:9090/healthz
+	- **Data Plane:** http://localhost:9091/healthz
+	- **Syncer:** http://localhost:9092/healthz
+
+6. Stop local services when finished.
+
+```bash
 task dev:down
+```
+
+Optional: List all available Task commands.
+
+```bash
+task --list-all
 ```
 
 ## Infrastructure & Delivery
@@ -70,7 +120,7 @@ Operational excellence is baked into Heimdall's design through infrastructure au
 
 Upcoming enhancements to the platform's operability:
 
-- [ ]  **Observability:** Instrument metrics and distributed tracing using Prometheus and Grafana.
-- [ ]  **Performance Tuning:** Implement automated load testing suites using k6 to benchmark Data Plane throughput.
+- [ ]  **Kubernetes Deployment (Interim):** Provide a Kubernetes deployment path (manifests + documented apply flow) while GitOps stabilization is in progress.
+- [ ]  **GitOps:** Fix and harden the current GitOps workflow (ArgoCD/Kustomize), then standardize sync policies, promotion flow, and rollback procedures.
 - [ ]  **Technical Documentation:** Add C4 Model architecture diagrams, Architectural Decision Records (ADRs), and operational runbooks.
 - [ ]  **Management UI:** Build a frontend control panel utilizing React and TypeScript.
