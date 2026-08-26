@@ -1,126 +1,107 @@
-# Heimdall: Enterprise-Grade Feature Flag Management
+# Heimdall
+
+Feature flag platform in Go. The admin API and the evaluation path run as
+separate services, so operating one doesn't slow down the other.
 
 [![CI Backend](https://github.com/rafaeljc/heimdall/actions/workflows/ci-backend.yml/badge.svg)](https://github.com/rafaeljc/heimdall/actions)
 [![CI Infra](https://github.com/rafaeljc/heimdall/actions/workflows/ci-infra.yml/badge.svg)](https://github.com/rafaeljc/heimdall/actions)
 [![CI Node SDK](https://github.com/rafaeljc/heimdall/actions/workflows/ci-node-sdk.yml/badge.svg)](https://github.com/rafaeljc/heimdall/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Heimdall is a distributed Feature Flag Management platform engineered for massive horizontal scalability and sub-millisecond evaluation latency at the edge.
+## Why it's built this way
 
-## The Motivation (Why Heimdall?)
+Feature flag traffic is asymmetric. Services read flags on every request;
+engineers change them a few times a day. Serving both from one database means
+the read path inherits the write path's latency, and when that database slows
+down, every service waiting on a flag slows down with it.
 
-In large-scale microservice environments, feature flag evaluation is fundamentally asymmetric: thousands of services query flags on *every request* (constant reads), while engineers update flags *minutes or hours apart* (rare writes). Traditional single-database architectures crumble under this read-heavy load and the database becomes a latency bottleneck and a cascading failure point. When the database slows or goes offline, every service stalls, unable to evaluate flags.
-
-**The Problem:** A single database cannot efficiently serve both high-throughput reads and strict consistency requirements.
-
-**The Solution:** Heimdall solves this using a **CQRS-inspired architecture**. It strictly isolates the administrative mutation plane (ACID-compliant) from the high-throughput evaluation plane (in-memory caching), ensuring that backend administrative tasks never impact the latency of client evaluations.
+Heimdall splits the two. Writes go to Postgres and get ACID guarantees. Reads
+never touch the database at all.
 
 ## Architecture
 
-Heimdall's design centers on the **CQRS pattern**: separating the slow, consistent write path from the fast, parallel read path.
+- **Control Plane (REST)** — the admin API. Operators create, update and delete
+  flags here. Every mutation is persisted to PostgreSQL, which is the source of
+  truth and enforces ACID guarantees.
+- **Data Plane (gRPC)** — the evaluation path. Flags are served from a
+  thread-safe in-process L1 cache backed by Redis as L2. The relational database
+  is never queried. Backups, migrations and schema changes on the Control Plane
+  cannot affect evaluation latency, because they are not on this path.
+- **Syncer** — the bridge between the two. It subscribes to Control Plane
+  mutations, transforms them into evaluation rules, publishes them to Redis and
+  invalidates L1 across Data Plane instances. Consistency between the planes is
+  eventual.
+- **Client SDKs** — thin libraries that cache evaluations locally with a
+  configurable TTL and refresh from the Data Plane once it expires. They own the
+  gRPC connection lifecycle and degrade gracefully when the Data Plane is
+  unreachable.
 
-* **Control Plane (REST):** The administrative interface for flag management. Operators create, update, and delete flags through this API. All mutations are persisted to **PostgreSQL**, which serves as the authoritative source of truth and enforces ACID guarantees. Changes are atomic and durable.
+## Load test
 
-* **Data Plane (gRPC):** The high-performance evaluation engine serving client flag lookups. It uses a two-tier caching strategy: an in-process **L1 cache** (thread-safe, zero-latency) backed by **Redis** (L2, distributed cache), providing sub-millisecond evaluation latency. The relational database is never queried. This separation means operational tasks on the Control Plane (backups, migrations, schema changes) never impact the latency of client evaluations.
+Two runs with k6, in this order: measure one unit
+first, then find out whether adding units helps.
 
-* **Syncer:** The bridge between the two planes. This asynchronous worker subscribes to Control Plane mutations, transforms them into optimized evaluation rules, and publishes them to Redis. It invalidates L1 caches across Data Plane instances, ensuring eventual consistency.
-
-* **Client SDKs:** Lightweight, resilient libraries embedded in your applications. They cache flag evaluations locally with a configurable TTL, delivering microsecond-latency responses for cached entries and automatically refreshing from the Data Plane after TTL expiration. SDKs handle gRPC connection lifecycle, graceful degradation on network failures, and abstract away the complexity of the Data Plane protocol.
-
-## Performance & Benchmarks
-
-Heimdall is load-tested to validate reliability and performance under high traffic. In this test configuration, the system showed strong horizontal scaling behavior.
-
-In this benchmark configuration, **a single Kubernetes Pod limited to 1 CPU (`1000m`) sustained over 10,000 Requests Per Second (RPS)** while maintaining **P99.9 latency under 20ms**.
+**One pod, one vCPU.** Sustained over 10,000 requests per second with P99.9
+latency under 20 ms.
 
 ![Heimdall Load Test - 10k RPS](https://github.com/user-attachments/assets/381b89e3-285d-4b60-9345-b8567724eb37)
 
-**Single-core configuration note:** By pinning the Go runtime (`GOMAXPROCS=1`) and limiting the Pod to a single core, Heimdall reduces multi-core lock contention and CPU cache bouncing (L1 invalidations). In this configuration, that contributed to high throughput with low infrastructure overhead.
+The pod is capped at a single core (`1000m`) with the Go runtime pinned to match
+(`GOMAXPROCS=1`). Running on one core removes cross-core lock contention and the
+cache-line bouncing that comes with it, and in this configuration that is where
+the throughput came from.
 
-**[View the full interactive Grafana Snapshot of the Load Test](https://snapshots.raintank.io/dashboard/snapshot/By0pG1AWnXhbbuHjq5Y1t6mpvrMY03o7)**
+**Three pods.** Load and replicas raised together. Throughput grew close to
+linearly. Three pods is where I stopped, not a ceiling I found.
 
-## Quick Start (Local Development)
+**[Full Grafana snapshot of the load test](https://snapshots.raintank.io/dashboard/snapshot/By0pG1AWnXhbbuHjq5Y1t6mpvrMY03o7)**
 
-Heimdall is built for a frictionless developer experience. 
+These numbers come from synthetic traffic — a load generator, not real users.
 
-**Prerequisites:**
-- [Docker](https://docs.docker.com/get-docker/)
-- [Go 1.24+](https://golang.org/doc/install)
-- [Task](https://taskfile.dev/installation/)
-- [buf](https://buf.build/docs/installation)
-- [golangci-lint](https://github.com/golangci/golangci-lint)
+## Quick start
 
-**Step-by-step:**
-
-1. Clone the repository and enter the project directory.
+**Prerequisites:** [Docker](https://docs.docker.com/get-docker/),
+[Go 1.24+](https://golang.org/doc/install),
+[Task](https://taskfile.dev/installation/),
+[buf](https://buf.build/docs/installation),
+[golangci-lint](https://github.com/golangci/golangci-lint).
 
 ```bash
+# 1. Clone
 git clone https://github.com/rafaeljc/heimdall.git && cd heimdall
-```
 
-2. Set up environment variables.
-
-```bash
+# 2. Configure
 cp .env.example .env
-```
 
-Review the configuration documentation before editing `.env` values: [docs/configuration.md](docs/configuration.md).
-
-3. Generate API key hashes (choose one option).
-
-Option A: Generate a new API key and hash.
-
-```bash
+# 3. Generate an API key and its hash (or `task sec:hash` to hash an existing one)
 task sec:genkey
-```
 
-Option B: Hash an existing API key.
-
-```bash
-task sec:hash
-```
-
-4. Start local services.
-
-```bash
+# 4. Start
 task dev:up
 ```
 
-5. After startup, the main local endpoints are:
+Read [docs/configuration.md](docs/configuration.md) before editing `.env` values.
 
-	- **Control Plane (REST):** http://localhost:8080
-	- **API Documentation (Swagger UI):** http://localhost:8081
-	- **Data Plane (gRPC):** localhost:50051
+| Service | Address |
+| --- | --- |
+| Control Plane (REST) | `http://localhost:8080` |
+| API docs (Swagger UI) | `http://localhost:8081` |
+| Data Plane (gRPC) | `localhost:50051` |
+| Health checks | `:9090/healthz` · `:9091/healthz` · `:9092/healthz` |
 
-	Health check endpoints:
-	- **Control Plane:** http://localhost:9090/healthz
-	- **Data Plane:** http://localhost:9091/healthz
-	- **Syncer:** http://localhost:9092/healthz
+`task dev:down` stops everything, `task --list-all` shows the rest.
 
-6. Stop local services when finished.
+## Infrastructure
 
-```bash
-task dev:down
-```
+- **Terraform** defines the AWS environment — VPC, EKS, Aurora and ElastiCache —
+  in layers.
+- **CI** validates infrastructure and application code separately. Infrastructure
+  runs Terraform formatting with TFLint, security scanning with Checkov, and
+  manifest validation with Kubeconform. Application runs linting and the test
+  suites. Every check has to pass before deployment.
+- **Kubernetes manifests** are Kustomize overlays under `infra/gitops/`, laid out
+  for a pull-based ArgoCD sync, with database migrations as a PreSync hook.
 
-Optional: List all available Task commands.
+## License
 
-```bash
-task --list-all
-```
-
-## Infrastructure & Delivery
-
-Operational excellence is baked into Heimdall's design through infrastructure automation, comprehensive validation, and GitOps-powered deployments.
-
-- **Infrastructure as Code (IaC):** The AWS environment (VPC, EKS, Aurora, ElastiCache) is provisioned dynamically using layered **Terraform**.
-- **Continuous Integration:** Automated GitHub Actions pipelines enforce code quality across infrastructure and application layers. Infrastructure validation includes Terraform formatting (TFLint), security scanning (Checkov), and Kubernetes manifest validation (Kubeconform). Application validation covers linting and comprehensive test suites. All checks must pass before deployment.
-- **Continuous Deployment:** Applications are delivered to Kubernetes using a pull-based **GitOps** model with ArgoCD and Kustomize, enabling automated rollouts, PreSync hook migrations, and zero-downtime updates.
-
-## Roadmap
-
-Upcoming enhancements to the platform's operability:
-
-- [ ]  **Kubernetes Deployment (Interim):** Provide a Kubernetes deployment path (manifests + documented apply flow) while GitOps stabilization is in progress.
-- [ ]  **GitOps:** Fix and harden the current GitOps workflow (ArgoCD/Kustomize), then standardize sync policies, promotion flow, and rollback procedures.
-- [ ]  **Technical Documentation:** Add C4 Model architecture diagrams, Architectural Decision Records (ADRs), and operational runbooks.
-- [ ]  **Management UI:** Build a frontend control panel utilizing React and TypeScript.
+MIT — see [LICENSE](LICENSE).
